@@ -42,7 +42,7 @@ export const appConfig: AppConfig = {
     name: 'Tillforty',
     logoSrc: '/logo.svg',
     initial: 'T',
-    primary: '18 91.5% 46.1%',
+    primary: '79.2 91.4% 54.3%',
   },
   nav: [{ label: 'Dashboard', href: '/', icon: LayoutDashboard }],
   settingsNav: [

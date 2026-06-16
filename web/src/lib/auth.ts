@@ -100,3 +100,14 @@ export async function completeOAuthLogin(token: string): Promise<User> {
   localStorage.setItem(USER_KEY, JSON.stringify(user))
   return user
 }
+
+export interface DemoInfo {
+  enabled: boolean
+  username?: string | null
+  password?: string | null
+}
+
+/** Demo-mode status + the public demo credentials (when DEMO_MODE is on). */
+export async function getDemoInfo(): Promise<DemoInfo> {
+  return api.get<DemoInfo>('/auth/demo')
+}

@@ -1,7 +1,13 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/context/AuthContext'
-import { getAuthProviders, oauthLoginUrl, type AuthProvider } from '@/lib/auth'
+import {
+  getAuthProviders,
+  getDemoInfo,
+  oauthLoginUrl,
+  type AuthProvider,
+  type DemoInfo,
+} from '@/lib/auth'
 import { useTranslation } from '@/i18n'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -46,6 +52,7 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [providers, setProviders] = useState<AuthProvider[]>([])
+  const [demo, setDemo] = useState<DemoInfo | null>(null)
 
   // Only providers the backend has configured come back here, so the buttons
   // appear exactly when their env vars are set.
@@ -54,6 +61,19 @@ export default function LoginPage() {
       .then(setProviders)
       .catch(() => setProviders([]))
   }, [])
+
+  // Demo mode (DEMO_MODE on the backend): surface the public demo credentials.
+  useEffect(() => {
+    getDemoInfo()
+      .then(setDemo)
+      .catch(() => setDemo(null))
+  }, [])
+
+  function fillDemo() {
+    if (!demo?.username) return
+    setEmail(demo.username)
+    setPassword(demo.password ?? '')
+  }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -77,13 +97,32 @@ export default function LoginPage() {
           <CardTitle>{t('auth.title')}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
+          {demo?.enabled && demo.username && (
+            <div className="rounded-md border border-primary/40 bg-primary/10 p-3 text-sm">
+              <p className="font-medium">{t('auth.demoTitle')}</p>
+              <p className="mt-1 text-muted-foreground">
+                {t('auth.demoUsername')}: <code className="font-mono">{demo.username}</code>
+                {' · '}
+                {t('auth.demoPassword')}: <code className="font-mono">{demo.password}</code>
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="mt-2 w-full"
+                onClick={fillDemo}
+              >
+                {t('auth.demoUse')}
+              </Button>
+            </div>
+          )}
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="email">{t('auth.email')}</Label>
               <Input
                 id="email"
-                type="email"
-                autoComplete="email"
+                type="text"
+                autoComplete="username"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required

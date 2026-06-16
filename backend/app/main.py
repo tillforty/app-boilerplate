@@ -9,7 +9,7 @@ import os
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
-from . import db, files, oauth, roles, vault, vectors
+from . import db, demo, files, oauth, roles, vault, vectors
 from .auth import ensure_schema_and_seed, router as auth_router
 
 DATABASE_URL = os.environ["DATABASE_URL"]
@@ -23,6 +23,8 @@ async def startup() -> None:
     await ensure_schema_and_seed()
     # roles must run after auth: it ALTERs/backfills the users table.
     await roles.ensure_schema_and_seed()
+    # demo must run after roles: it seeds the demo user with the member role.
+    await demo.ensure_demo_user()
     await vault.ensure_schema()
     await files.ensure_schema()
     await vectors.ensure_schema()
@@ -34,6 +36,7 @@ async def shutdown() -> None:
 
 
 app.include_router(auth_router)
+app.include_router(demo.router)
 app.include_router(oauth.router)
 app.include_router(roles.router)
 app.include_router(vault.router)

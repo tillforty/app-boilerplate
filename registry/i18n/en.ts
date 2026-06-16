@@ -41,6 +41,10 @@ export const en = {
     completing: 'Completing sign-in…',
     missingToken: 'Missing sign-in token.',
     callbackFailed: 'Sign-in failed. Please try again.',
+    demoTitle: 'Demo access',
+    demoUsername: 'Username',
+    demoPassword: 'Password',
+    demoUse: 'Use demo credentials',
   },
   roles: {
     title: 'Roles & permissions',
