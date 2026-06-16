@@ -14,6 +14,10 @@ import {
   Component,
   type LucideIcon,
 } from 'lucide-react'
+// Import the logo as a Vite asset so it gets a content-hashed URL
+// (/assets/logo-xxxx.svg). Changing the file changes the URL, so browsers can't
+// serve a stale cached copy. Drop your own logo in src/assets/logo.svg.
+import logoUrl from '@/assets/logo.svg'
 
 export interface NavItem {
   label: string
@@ -48,7 +52,7 @@ export interface AppConfig {
 export const appConfig: AppConfig = {
   brand: {
     name: 'Tillforty',
-    logoSrc: '/logo.svg',
+    logoSrc: logoUrl,
     initial: 'T',
     primary: '79.2 91.4% 54.3%',
   },
