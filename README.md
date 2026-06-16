@@ -193,6 +193,11 @@ cp .env.example .env        # never commit the filled-in .env
 | `OPERATING_AGENT_MODEL` | API | LLM powering the operating agent (reasoning / chat / tool use). |
 | `OPERATING_AGENT_API_KEY` | API | Key for the operating-agent provider. |
 | `OPERATING_AGENT_BASE_URL` | API | Optional provider base-URL override. |
+| `SMTP_HOST` / `SMTP_PORT` | API | Outbound email server (`backend/app/mailer.py`). Blank `SMTP_HOST` disables sending. |
+| `SMTP_USERNAME` / `SMTP_PASSWORD` | API | SMTP login (use an app password for Gmail/Workspace). |
+| `SMTP_STARTTLS` / `SMTP_SSL` | API | Transport security — STARTTLS for port 587, implicit SSL for 465. |
+| `SMTP_FROM_EMAIL` / `SMTP_FROM_NAME` | API | From address + display name (defaults to `SMTP_USERNAME`). |
+| `DOMAIN` / `ACME_EMAIL` | Caddy | Set `DOMAIN` to serve public HTTPS (auto Let's Encrypt cert). Blank = local only. See [DEPLOY.md](DEPLOY.md). |
 | `VITE_API_PROXY_TARGET` | Web (dev) | Where the Vite dev server proxies `/api`. Prod uses the relative `/api`. |
 
 ## Backend
