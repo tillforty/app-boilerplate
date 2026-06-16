@@ -116,6 +116,13 @@ cp .env.example .env        # never commit the filled-in .env
 | `SEED_USER_*` | API | First user seeded on startup (name, surname, email, password). |
 | `VAULT_KEY` | API | Symmetric key for the encrypted vault. **Rotating makes existing `vault_secrets` undecryptable.** |
 | `STORAGE_DIR` | API | Disk path for uploaded file binaries — bind-mount to a persistent volume. |
+| `EMBEDDING_MODEL` | API | Model that turns text into vectors for the pgvector store. |
+| `EMBEDDING_DIM` | API | Vector dimension — **must match** the embedding model (`text-embedding-3-small` = 1536). |
+| `EMBEDDING_API_KEY` | API | Key for the embedding provider. |
+| `EMBEDDING_BASE_URL` | API | Optional provider base-URL override (Azure / proxy / self-hosted). |
+| `OPERATING_AGENT_MODEL` | API | LLM powering the operating agent (reasoning / chat / tool use). |
+| `OPERATING_AGENT_API_KEY` | API | Key for the operating-agent provider. |
+| `OPERATING_AGENT_BASE_URL` | API | Optional provider base-URL override. |
 | `VITE_API_PROXY_TARGET` | Web (dev) | Where the Vite dev server proxies `/api`. Prod uses the relative `/api`. |
 
 ## Backend
