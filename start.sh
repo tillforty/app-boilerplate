@@ -70,6 +70,18 @@ if [ ! -f .env ]; then
   # Host port mappings (Compose has defaults, but expose them for easy editing).
   grep -q '^WEB_PORT=' .env || printf '\n# Host ports\nWEB_PORT=8080\nAPI_PORT=8000\n' >> .env
 
+  # Deploy-time overrides from the environment (used by deploy.sh / unattended
+  # installs). Applied only on first-run .env creation. Setting DOMAIN here makes
+  # the public HTTPS proxy come up on this very run; OAuth's redirect base
+  # defaults to https://DOMAIN unless explicitly provided.
+  [ -n "${DOMAIN:-}" ]     && { set_env DOMAIN "$DOMAIN";         info "DOMAIN set from environment: $DOMAIN"; }
+  [ -n "${ACME_EMAIL:-}" ] && set_env ACME_EMAIL "$ACME_EMAIL"
+  if [ -n "${OAUTH_REDIRECT_BASE_URL:-}" ]; then
+    set_env OAUTH_REDIRECT_BASE_URL "$OAUTH_REDIRECT_BASE_URL"
+  elif [ -n "${DOMAIN:-}" ]; then
+    set_env OAUTH_REDIRECT_BASE_URL "https://${DOMAIN}"
+  fi
+
   ok ".env created. DB/JWT/Vault secrets generated."
   warn "LLM keys (EMBEDDING_API_KEY / OPERATING_AGENT_API_KEY) are left as CHANGE_ME."
   warn "The app runs fine without them; fill them in .env to enable embeddings/LLM."

@@ -49,9 +49,19 @@ Override the host ports by editing `WEB_PORT` / `API_PORT` in `.env`. The LLM ke
 (`EMBEDDING_API_KEY`, `OPERATING_AGENT_API_KEY`) are left as `CHANGE_ME` — the app
 runs fine without them; fill them in `.env` to enable embeddings / the LLM agent.
 
-**Public HTTPS deploy:** set `DOMAIN` (and `ACME_EMAIL`) in `.env` and `start.sh`
-brings up an optional Caddy reverse proxy that auto-provisions a Let's Encrypt
-certificate and serves the app at `https://<your-domain>`. See **[DEPLOY.md](DEPLOY.md)**.
+**Public HTTPS deploy (one command):** point DNS at a fresh server, open ports
+80/443, then run — on the box, as root/sudo:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/tillforty/app-boilerplate/main/deploy.sh \
+  | DOMAIN=app.tillforty.com ACME_EMAIL=ops@tillforty.com bash
+```
+
+`deploy.sh` installs Docker if needed, clones the repo, generates `.env` + secrets,
+and brings up the stack behind a Caddy reverse proxy that auto-provisions a Let's
+Encrypt certificate — leaving the app live at `https://app.tillforty.com`. It's
+idempotent (re-run = `git pull` + rebuild, data preserved). Full walkthrough,
+tunables, and the manual path: **[DEPLOY.md](DEPLOY.md)**.
 
 What the runtime adds on top of the registry (all generated, editable source):
 
