@@ -8,6 +8,7 @@ A full-stack starter shared across Tillforty apps:
 
 ```
 app-boilerplate/
+├─ .env.example         # consolidated env template (root, full-stack)
 ├─ registry/            # frontend source, distributed via the shadcn registry
 │  ├─ theme/tokens.css      → src/index.css
 │  ├─ lib/{utils,api,auth}.ts
@@ -96,13 +97,34 @@ CREATE TABLE IF NOT EXISTS vault_secrets (
 
 ---
 
+## Environment variables
+
+Copy the template and fill in every `CHANGE_ME` — generate secrets with
+`openssl rand -hex 32`. There's a consolidated root template (`.env.example`,
+docker-compose / full-stack style) and a backend-only one (`backend/.env.example`).
+
+```bash
+cp .env.example .env        # never commit the filled-in .env
+```
+
+| Variable | Used by | Purpose |
+| --- | --- | --- |
+| `DATABASE_URL` | API | Postgres DSN the API connects with. |
+| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | Postgres | Provision the DB on first boot (match `DATABASE_URL`). |
+| `JWT_SECRET` | API | Signs login tokens. **Rotating invalidates all sessions.** |
+| `JWT_EXPIRE_MINUTES` | API | Token lifetime (default `720` = 12h). |
+| `SEED_USER_*` | API | First user seeded on startup (name, surname, email, password). |
+| `VAULT_KEY` | API | Symmetric key for the encrypted vault. **Rotating makes existing `vault_secrets` undecryptable.** |
+| `STORAGE_DIR` | API | Disk path for uploaded file binaries — bind-mount to a persistent volume. |
+| `VITE_API_PROXY_TARGET` | Web (dev) | Where the Vite dev server proxies `/api`. Prod uses the relative `/api`. |
+
 ## Backend
 
 ```bash
 cd backend
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env        # then fill in the CHANGE_ME values
+cp ../.env.example .env      # or backend/.env.example — fill in the CHANGE_ME values
 uvicorn app.main:app --reload --root-path /api
 ```
 
