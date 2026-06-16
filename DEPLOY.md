@@ -24,11 +24,15 @@ curl -fsSL https://raw.githubusercontent.com/tillforty/app-boilerplate/main/depl
   | DOMAIN=app.tillforty.com ACME_EMAIL=ops@tillforty.com bash
 ```
 
-Or **from your laptop** against a server you can SSH into:
+Or **from your laptop** against a server you can SSH into — either the raw SSH
+one-liner, or the `make` shortcut from a clone of this repo:
 
 ```bash
 ssh root@SERVER 'curl -fsSL https://raw.githubusercontent.com/tillforty/app-boilerplate/main/deploy.sh \
   | DOMAIN=app.tillforty.com ACME_EMAIL=ops@tillforty.com bash'
+
+# …or:
+make deploy SERVER=root@SERVER DOMAIN=app.tillforty.com ACME_EMAIL=ops@tillforty.com
 ```
 
 That's it. `deploy.sh` will:
