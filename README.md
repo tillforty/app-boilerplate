@@ -13,7 +13,8 @@ app-boilerplate/
 │  ├─ theme/tokens.css      → src/index.css
 │  ├─ lib/{utils,api,auth}.ts
 │  ├─ config/app-config.tsx # << the one file each app edits (brand + nav)
-│  └─ blocks/{auth,app-shell}/
+│  ├─ i18n/                  # translations (en) + provider + language switcher
+│  └─ blocks/{auth,app-shell,roles}/
 ├─ registry.json        # registry manifest (`shadcn build` → /r/*.json)
 ├─ tailwind-preset.js   # shared Tailwind theme preset
 ├─ components.json.example
@@ -185,6 +186,26 @@ On the frontend, `pull` the `roles` block, then wrap your app in
   </PermissionsProvider>
 </AuthProvider>
 ```
+
+### Internationalization (i18n)
+
+Dependency-free. Pull the `i18n` block, wrap your app in `I18nProvider`, and use
+`t()` for copy. English (`src/i18n/en.ts`) is the default and the fallback for any
+missing key.
+
+```tsx
+import { I18nProvider, useTranslation } from '@/i18n'
+
+// <I18nProvider> at the root, then:
+const { t } = useTranslation()
+t('roles.title')                 // "Roles & permissions"
+t('roles.editRole', { name })    // interpolates {name}
+```
+
+**Add a language:** copy `src/i18n/en.ts` to e.g. `lt.ts`, translate the values
+(keep the keys), then register it in `src/i18n/index.tsx` (`dictionaries` +
+`LANGUAGE_LABELS`). Drop `<LanguageSwitcher />` into the Header — it lists every
+registered language and persists the choice to `localStorage` (`tf_lang`).
 
 ### Embeddings + LLM
 

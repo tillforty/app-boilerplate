@@ -72,6 +72,19 @@
         { "path": "registry/blocks/roles/PermissionGate.tsx", "type": "registry:component", "target": "src/components/PermissionGate.tsx" },
         { "path": "registry/blocks/roles/RolesPage.tsx", "type": "registry:component", "target": "src/pages/RolesPage.tsx" }
       ]
+    },
+    {
+      "name": "i18n",
+      "type": "registry:block",
+      "title": "Internationalization (i18n)",
+      "description": "Dependency-free i18n: I18nProvider, useTranslation t() with interpolation, an English translations file, and a language switcher. Add languages by dropping in a dictionary.",
+      "registryDependencies": ["button", "dropdown-menu"],
+      "dependencies": ["lucide-react"],
+      "files": [
+        { "path": "registry/i18n/en.ts", "type": "registry:lib", "target": "src/i18n/en.ts" },
+        { "path": "registry/i18n/index.tsx", "type": "registry:lib", "target": "src/i18n/index.tsx" },
+        { "path": "registry/i18n/LanguageSwitcher.tsx", "type": "registry:component", "target": "src/i18n/LanguageSwitcher.tsx" }
+      ]
     }
   ]
 }
