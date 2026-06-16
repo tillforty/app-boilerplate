@@ -1,0 +1,18 @@
+# Tillforty app boilerplate — Caddy reverse proxy (public HTTPS).
+#
+# Used only by the optional `caddy` service (compose profile `public`, enabled
+# when DOMAIN is set in .env). Caddy fetches and renews a Let's Encrypt cert for
+# ${DOMAIN} automatically, then forwards all traffic to the `web` (nginx)
+# container, which serves the SPA and proxies /api to the backend.
+#
+# DOMAIN     — the public hostname, e.g. app.tillforty.com (required when used)
+# ACME_EMAIL — contact email for Let's Encrypt (recommended; expiry notices)
+
+{
+	email {$ACME_EMAIL}
+}
+
+{$DOMAIN} {
+	encode gzip
+	reverse_proxy web:80
+}

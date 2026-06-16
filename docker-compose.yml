@@ -69,6 +69,28 @@ services:
     ports:
       - "${WEB_PORT:-8080}:80"
 
+  # ── Caddy reverse proxy (public HTTPS) — OPTIONAL ────────────────────────
+  # Only runs when the `public` profile is active (start.sh enables it when
+  # DOMAIN is set in .env). Terminates TLS with an automatic Let's Encrypt
+  # certificate for ${DOMAIN} and proxies everything to the web (nginx) service,
+  # which already serves the SPA and proxies /api to the backend.
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    profiles: ["public"]
+    env_file: .env
+    depends_on:
+      - web
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data       # ACME certs + account keys (must persist)
+      - caddy_config:/config
+
 volumes:
   pgdata:
   storage:
+  caddy_data:
+  caddy_config:

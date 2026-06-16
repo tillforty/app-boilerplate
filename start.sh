@@ -81,6 +81,15 @@ fi
 WEB_PORT="$(grep -E '^WEB_PORT=' .env | cut -d= -f2 || true)"; WEB_PORT="${WEB_PORT:-8080}"
 API_PORT="$(grep -E '^API_PORT=' .env | cut -d= -f2 || true)"; API_PORT="${API_PORT:-8000}"
 
+# When DOMAIN is set, run the optional Caddy reverse proxy (public HTTPS) by
+# enabling the `public` compose profile. Exported so every $DC call below —
+# up/down/destroy/logs — consistently includes the caddy service.
+DOMAIN="$(grep -E '^DOMAIN=' .env | cut -d= -f2 || true)"
+if [ -n "${DOMAIN:-}" ]; then
+  export COMPOSE_PROFILES=public
+  info "DOMAIN=${DOMAIN} — public HTTPS proxy (Caddy) enabled. Ensure ports 80/443 are free and DNS points here."
+fi
+
 # ── Subcommands ──────────────────────────────────────────────────────────────
 case "${1:-up}" in
   down)    info "Stopping stack (data preserved)…"; $DC down; ok "Stopped."; exit 0 ;;
@@ -113,13 +122,24 @@ else
   warn "API didn't report ready within ~2 min. Check logs: $DC logs api"
 fi
 
-cat <<EOF
+if [ -n "${DOMAIN:-}" ]; then
+  cat <<EOF
+
+  Public URL: https://${DOMAIN}        (Caddy is fetching a TLS cert — first
+              request may take a few seconds; check '$DC logs caddy' if it stalls)
+  API docs:   https://${DOMAIN}/api/docs
+  Local:      http://localhost:${WEB_PORT}   (still published for direct access)
+
+EOF
+else
+  cat <<EOF
 
   Web UI:     http://localhost:${WEB_PORT}
   API:        http://localhost:${API_PORT}
   API docs:   http://localhost:${WEB_PORT}/api/docs   (via the web proxy)
 
 EOF
+fi
 
 if [ -n "$ADMIN_PASSWORD" ]; then
   ADMIN_EMAIL="$(grep -E '^SEED_USER_EMAIL=' .env | cut -d= -f2)"

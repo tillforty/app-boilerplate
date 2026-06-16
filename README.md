@@ -49,6 +49,10 @@ Override the host ports by editing `WEB_PORT` / `API_PORT` in `.env`. The LLM ke
 (`EMBEDDING_API_KEY`, `OPERATING_AGENT_API_KEY`) are left as `CHANGE_ME` — the app
 runs fine without them; fill them in `.env` to enable embeddings / the LLM agent.
 
+**Public HTTPS deploy:** set `DOMAIN` (and `ACME_EMAIL`) in `.env` and `start.sh`
+brings up an optional Caddy reverse proxy that auto-provisions a Let's Encrypt
+certificate and serves the app at `https://<your-domain>`. See **[DEPLOY.md](DEPLOY.md)**.
+
 What the runtime adds on top of the registry (all generated, editable source):
 
 - **`web/`** — a Vite + React + TypeScript app that already consumes the registry
