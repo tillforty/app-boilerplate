@@ -58,6 +58,20 @@
         { "path": "registry/blocks/app-shell/Header.tsx", "type": "registry:component", "target": "src/components/layout/Header.tsx" },
         { "path": "registry/blocks/app-shell/Sidebar.tsx", "type": "registry:component", "target": "src/components/layout/Sidebar.tsx" }
       ]
+    },
+    {
+      "name": "roles",
+      "type": "registry:block",
+      "title": "Roles & permissions (RBAC)",
+      "description": "Role management UI with permission checkboxes, a usePermissions hook, and a PermissionGate. Pairs with the backend roles router.",
+      "registryDependencies": ["auth", "button", "card", "dialog", "checkbox", "input", "label", "badge"],
+      "dependencies": ["lucide-react"],
+      "files": [
+        { "path": "registry/lib/roles.ts", "type": "registry:lib", "target": "src/lib/roles.ts" },
+        { "path": "registry/blocks/roles/PermissionsContext.tsx", "type": "registry:component", "target": "src/context/PermissionsContext.tsx" },
+        { "path": "registry/blocks/roles/PermissionGate.tsx", "type": "registry:component", "target": "src/components/PermissionGate.tsx" },
+        { "path": "registry/blocks/roles/RolesPage.tsx", "type": "registry:component", "target": "src/pages/RolesPage.tsx" }
+      ]
     }
   ]
 }

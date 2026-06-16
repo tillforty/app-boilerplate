@@ -5,7 +5,7 @@
  * Sidebar read everything from here, so the shell itself stays generic and can
  * be pulled/updated from the registry without clobbering your branding.
  */
-import { LayoutDashboard, Users, type LucideIcon } from 'lucide-react'
+import { LayoutDashboard, Users, Shield, type LucideIcon } from 'lucide-react'
 
 export interface NavItem {
   label: string
@@ -35,5 +35,8 @@ export const appConfig: AppConfig = {
     initial: 'T',
   },
   nav: [{ label: 'Dashboard', href: '/', icon: LayoutDashboard }],
-  settingsNav: [{ label: 'Users', href: '/settings/users', icon: Users }],
+  settingsNav: [
+    { label: 'Users', href: '/settings/users', icon: Users },
+    { label: 'Roles', href: '/settings/roles', icon: Shield },
+  ],
 }

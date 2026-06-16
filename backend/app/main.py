@@ -9,7 +9,7 @@ import os
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
-from . import db, files, vault, vectors
+from . import db, files, roles, vault, vectors
 from .auth import ensure_schema_and_seed, router as auth_router
 
 DATABASE_URL = os.environ["DATABASE_URL"]
@@ -21,6 +21,8 @@ app = FastAPI(title="Tillforty App API")
 async def startup() -> None:
     await db.connect(DATABASE_URL)
     await ensure_schema_and_seed()
+    # roles must run after auth: it ALTERs/backfills the users table.
+    await roles.ensure_schema_and_seed()
     await vault.ensure_schema()
     await files.ensure_schema()
     await vectors.ensure_schema()
@@ -32,6 +34,7 @@ async def shutdown() -> None:
 
 
 app.include_router(auth_router)
+app.include_router(roles.router)
 app.include_router(vault.router)
 app.include_router(files.router)
 # Register your app-specific routers here.

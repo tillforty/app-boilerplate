@@ -17,8 +17,8 @@ app-boilerplate/
 ├─ registry.json        # registry manifest (`shadcn build` → /r/*.json)
 ├─ tailwind-preset.js   # shared Tailwind theme preset
 ├─ components.json.example
-├─ backend/             # FastAPI app: auth + vault + files + vectors + llm
-│  ├─ app/{db,security,auth,vault,files,vectors,llm,main}.py
+├─ backend/             # FastAPI app: auth + roles + vault + files + vectors + llm
+│  ├─ app/{db,security,auth,roles,vault,files,vectors,llm,main}.py
 │  ├─ requirements.txt
 │  └─ .env.example
 └─ migrations/          # SQL — run in order
@@ -26,7 +26,8 @@ app-boilerplate/
    ├─ 0002_users.sql
    ├─ 0003_files.sql
    ├─ 0004_vault.sql
-   └─ 0005_pgvector.sql
+   ├─ 0005_pgvector.sql
+   └─ 0006_roles.sql
 ```
 
 ---
@@ -145,6 +146,45 @@ Endpoints out of the box: `/auth/login`, `/auth/logout`, `/auth/me`,
 `/ready`. Add your own routers in `app/main.py`. Required env vars are documented
 in `backend/.env.example` (`DATABASE_URL`, `JWT_SECRET`, `VAULT_KEY`,
 `STORAGE_DIR`, and the `SEED_USER_*` for the first user).
+
+### Roles & permissions (RBAC)
+
+Each user has one role (`users.role_id`); a role holds a set of permission keys
+like `users:read` (the `*` wildcard grants everything). Two **system** roles are
+seeded and cannot be deleted:
+
+- **administrator** — `['*']`, can do anything; its permissions are locked.
+- **member** — a limited demo set (`users:read`, `files:read`, `files:upload`), editable.
+
+The selectable functions/actions live in `roles.py` `PERMISSION_CATALOG` — add an
+entry there and it appears as checkboxes in the role editor. Guard any route:
+
+```python
+from app.roles import require_permission
+
+@router.delete("/widgets/{id}")
+async def delete_widget(id: int, _=Depends(require_permission("widgets:delete"))):
+    ...
+```
+
+Endpoints: `GET /roles`, `POST /roles`, `GET/PATCH/DELETE /roles/{id}`,
+`PUT /roles/assign`, `GET /roles/permissions` (the catalog), `GET /roles/me`
+(your role + effective permissions). Deleting a system role → 403; deleting a
+role still assigned to users → 409.
+
+On the frontend, `pull` the `roles` block, then wrap your app in
+`PermissionsProvider` (inside `AuthProvider`), gate UI with `<PermissionGate>` /
+`usePermissions().can(...)`, and route `/settings/roles` → `RolesPage`:
+
+```tsx
+<AuthProvider>
+  <PermissionsProvider>
+    {/* ... */}
+    <Route path="/settings/roles" element={<RolesPage />} />
+    <PermissionGate permission="roles:manage"><AdminButton /></PermissionGate>
+  </PermissionsProvider>
+</AuthProvider>
+```
 
 ### Embeddings + LLM
 
