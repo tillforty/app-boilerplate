@@ -91,6 +91,7 @@ fi
 export DOMAIN="${DOMAIN:-}"
 export ACME_EMAIL="${ACME_EMAIL:-}"
 export OAUTH_REDIRECT_BASE_URL="${OAUTH_REDIRECT_BASE_URL:-}"
+export CADDY_TLS="${CADDY_TLS:-}"
 
 [ -n "$DOMAIN" ] || warn "DOMAIN not set — deploying local-only (HTTP on :8080, no TLS)."
 
@@ -98,7 +99,7 @@ info "Handing off to start.sh…"
 cd "$APP_DIR"
 if [ -n "$SUDO" ]; then
   # Run the stack as root (Docker), forwarding the deploy vars through sudo.
-  exec sudo --preserve-env=DOMAIN,ACME_EMAIL,OAUTH_REDIRECT_BASE_URL ./start.sh
+  exec sudo --preserve-env=DOMAIN,ACME_EMAIL,OAUTH_REDIRECT_BASE_URL,CADDY_TLS ./start.sh
 else
   exec ./start.sh
 fi

@@ -59,6 +59,7 @@ docker compose logs caddy  # cert issuance specifically
 | --- | --- | --- |
 | `DOMAIN` | _(unset)_ | Public hostname. Omit for a local-only HTTP run. |
 | `ACME_EMAIL` | _(unset)_ | Let's Encrypt contact email (expiry notices). |
+| `CADDY_TLS` | _(unset)_ | Origin TLS strategy. Blank = auto Let's Encrypt. `tls internal` = self-signed, for behind a proxy (see Cloudflare below). |
 | `OAUTH_REDIRECT_BASE_URL` | `https://$DOMAIN` | Override if the public URL differs. |
 | `GIT_URL` | this repo | Source repo to deploy. |
 | `BRANCH` | `main` | Branch to deploy. |
@@ -66,6 +67,39 @@ docker compose logs caddy  # cert issuance specifically
 
 `deploy.sh` is **idempotent** — re-running it does `git pull` + rebuild and
 preserves the database, uploaded files, and secrets. Use it as your update path too.
+
+---
+
+## Behind Cloudflare (or another TLS-terminating proxy)
+
+If the domain is proxied through Cloudflare (orange-cloud), Let's Encrypt's
+HTTP-01 challenge can't reach this origin, so **don't** use the default ACME mode.
+Instead let the origin serve a self-signed cert and let Cloudflare terminate TLS
+for the browser:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/tillforty/app-boilerplate/main/deploy.sh \
+  | DOMAIN=app.tillforty.com CADDY_TLS="tls internal" bash
+```
+
+Then in the **Cloudflare dashboard**:
+
+1. **DNS** → set the `app` `A` record to this server's IP, proxy **on** (orange).
+2. **SSL/TLS** → **Overview** → set encryption mode to **Full**. (Cloudflare
+   encrypts edge↔origin and accepts the origin's self-signed cert. Don't use
+   *Flexible* — it leaves the origin leg unencrypted and can cause redirect loops;
+   don't use *Full (strict)* unless you install a Cloudflare Origin Certificate.)
+
+```
+Browser ──HTTPS──> Cloudflare (public cert) ──HTTPS──> caddy (self-signed, :443)
+                                                         └─> web ─> api ─> postgres
+```
+
+Because the origin cert is self-signed, you can deploy and verify the server
+**before** repointing DNS — the stack comes up immediately; flipping Cloudflare
+is the only remaining step. For a fully-validated chain instead, generate a
+Cloudflare **Origin Certificate**, mount it, set `CADDY_TLS="tls /path/cert /path/key"`,
+and use Cloudflare mode *Full (strict)*.
 
 ---
 

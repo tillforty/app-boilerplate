@@ -76,6 +76,7 @@ if [ ! -f .env ]; then
   # defaults to https://DOMAIN unless explicitly provided.
   [ -n "${DOMAIN:-}" ]     && { set_env DOMAIN "$DOMAIN";         info "DOMAIN set from environment: $DOMAIN"; }
   [ -n "${ACME_EMAIL:-}" ] && set_env ACME_EMAIL "$ACME_EMAIL"
+  [ -n "${CADDY_TLS:-}" ]  && { set_env CADDY_TLS "$CADDY_TLS";   info "CADDY_TLS set from environment: $CADDY_TLS"; }
   if [ -n "${OAUTH_REDIRECT_BASE_URL:-}" ]; then
     set_env OAUTH_REDIRECT_BASE_URL "$OAUTH_REDIRECT_BASE_URL"
   elif [ -n "${DOMAIN:-}" ]; then
