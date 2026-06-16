@@ -74,8 +74,14 @@ export async function changePassword(
   await api.post<void>('/auth/change-password', { current_password, new_password })
 }
 
-export async function listUsers(): Promise<User[]> {
-  return api.get<User[]>('/auth/users')
+/** A row in the users admin table: identity + role name + join date. */
+export interface UserRow extends User {
+  role: string | null
+  created_at: string
+}
+
+export async function listUsers(): Promise<UserRow[]> {
+  return api.get<UserRow[]>('/auth/users')
 }
 
 export interface AuthProvider {

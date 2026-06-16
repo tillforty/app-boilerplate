@@ -5,6 +5,7 @@ startup from the SEED_USER_* environment variables (see ensure_schema_and_seed).
 The canonical DDL also lives in migrations/0002_users.sql.
 """
 import os
+from datetime import datetime
 
 import jwt
 from fastapi import APIRouter, Depends, HTTPException, Response, status
@@ -38,6 +39,16 @@ class UserOut(BaseModel):
     name: str
     surname: str
     email: str
+
+
+class UserListItem(BaseModel):
+    """Row for the users admin table: identity + role name + join date."""
+    id: int
+    name: str
+    surname: str
+    email: str
+    role: str | None = None
+    created_at: datetime
 
 
 class LoginResponse(BaseModel):
@@ -166,9 +177,14 @@ async def change_password(
     )
 
 
-@router.get("/users", response_model=list[UserOut])
-async def list_users(_: UserOut = Depends(get_current_user)) -> list[UserOut]:
+@router.get("/users", response_model=list[UserListItem])
+async def list_users(_: UserOut = Depends(get_current_user)) -> list[UserListItem]:
     rows = await db.get_pool().fetch(
-        "SELECT id, name, surname, email FROM users ORDER BY id"
+        """
+        SELECT u.id, u.name, u.surname, u.email, u.created_at, r.name AS role
+        FROM users u
+        LEFT JOIN roles r ON r.id = u.role_id
+        ORDER BY u.id
+        """
     )
-    return [UserOut(**dict(r)) for r in rows]
+    return [UserListItem(**dict(r)) for r in rows]

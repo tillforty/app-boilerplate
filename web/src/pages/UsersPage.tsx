@@ -1,22 +1,37 @@
 import { useEffect, useState } from 'react'
-import { listUsers, type User } from '@/lib/auth'
+import { listUsers, type UserRow } from '@/lib/auth'
 import { listRoles, assignRole, type Role } from '@/lib/roles'
 import { usePermissions } from '@/context/PermissionsContext'
 import { useTranslation } from '@/i18n'
+import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { Badge } from '@/components/ui/badge'
+import { Skeleton } from '@/components/ui/skeleton'
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card'
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
+
+function initials(name: string, surname: string): string {
+  return `${name.charAt(0)}${surname.charAt(0)}`.toUpperCase() || '?'
+}
+
+function formatDate(iso: string): string {
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime())
+    ? '—'
+    : d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+}
 
 export default function UsersPage() {
   const { t } = useTranslation()
   const { can } = usePermissions()
   const canManage = can('users:update')
 
-  const [users, setUsers] = useState<User[]>([])
+  const [users, setUsers] = useState<UserRow[]>([])
   const [roles, setRoles] = useState<Role[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -44,10 +59,19 @@ export default function UsersPage() {
     setError(null)
     try {
       await assignRole(userId, Number(roleId))
+      setUsers((prev) =>
+        prev.map((u) =>
+          u.id === userId
+            ? { ...u, role: roles.find((r) => r.id === Number(roleId))?.name ?? u.role }
+            : u,
+        ),
+      )
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to assign role')
     }
   }
+
+  const colSpan = canManage ? 5 : 4
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
@@ -62,43 +86,89 @@ export default function UsersPage() {
         </div>
       )}
 
-      {loading ? (
-        <p className="text-sm text-muted-foreground">{t('common.loading')}</p>
-      ) : (
-        <div className="grid gap-4 sm:grid-cols-2">
-          {users.map((u) => (
-            <Card key={u.id}>
-              <CardHeader>
-                <CardTitle className="text-base">
-                  {u.name} {u.surname}
-                </CardTitle>
-                <CardDescription>{u.email}</CardDescription>
-              </CardHeader>
-              {canManage && (
-                <CardContent>
-                  <label className="flex items-center gap-2 text-sm">
-                    <span className="text-muted-foreground">{t('nav.roles')}:</span>
-                    <select
-                      className="h-9 rounded-md border border-input bg-background px-2 text-sm"
-                      defaultValue=""
-                      onChange={(e) => onAssign(u.id, e.target.value)}
-                    >
-                      <option value="" disabled>
-                        —
-                      </option>
-                      {roles.map((r) => (
-                        <option key={r.id} value={r.id}>
-                          {r.name}
+      <div className="rounded-lg border">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>{t('users.colUser')}</TableHead>
+              <TableHead>{t('users.colEmail')}</TableHead>
+              <TableHead>{t('users.colRole')}</TableHead>
+              <TableHead>{t('users.colJoined')}</TableHead>
+              {canManage && <TableHead className="text-right">{t('users.colActions')}</TableHead>}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {loading ? (
+              Array.from({ length: 4 }).map((_, i) => (
+                <TableRow key={i}>
+                  <TableCell>
+                    <div className="flex items-center gap-3">
+                      <Skeleton className="h-8 w-8 rounded-full" />
+                      <Skeleton className="h-4 w-28" />
+                    </div>
+                  </TableCell>
+                  <TableCell><Skeleton className="h-4 w-40" /></TableCell>
+                  <TableCell><Skeleton className="h-5 w-16 rounded-full" /></TableCell>
+                  <TableCell><Skeleton className="h-4 w-20" /></TableCell>
+                  {canManage && <TableCell><Skeleton className="ml-auto h-9 w-32" /></TableCell>}
+                </TableRow>
+              ))
+            ) : users.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={colSpan} className="h-24 text-center text-muted-foreground">
+                  {t('users.empty')}
+                </TableCell>
+              </TableRow>
+            ) : (
+              users.map((u) => (
+                <TableRow key={u.id}>
+                  <TableCell>
+                    <div className="flex items-center gap-3">
+                      <Avatar className="h-8 w-8">
+                        <AvatarFallback className="text-xs">
+                          {initials(u.name, u.surname)}
+                        </AvatarFallback>
+                      </Avatar>
+                      <span className="font-medium">
+                        {u.name} {u.surname}
+                      </span>
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">{u.email}</TableCell>
+                  <TableCell>
+                    {u.role ? (
+                      <Badge variant="secondary" className="capitalize">
+                        {u.role}
+                      </Badge>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">{formatDate(u.created_at)}</TableCell>
+                  {canManage && (
+                    <TableCell className="text-right">
+                      <select
+                        className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+                        value={roles.find((r) => r.name === u.role)?.id ?? ''}
+                        onChange={(e) => onAssign(u.id, e.target.value)}
+                      >
+                        <option value="" disabled>
+                          {t('users.assignRole')}
                         </option>
-                      ))}
-                    </select>
-                  </label>
-                </CardContent>
-              )}
-            </Card>
-          ))}
-        </div>
-      )}
+                        {roles.map((r) => (
+                          <option key={r.id} value={r.id}>
+                            {r.name}
+                          </option>
+                        ))}
+                      </select>
+                    </TableCell>
+                  )}
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </div>
     </div>
   )
 }

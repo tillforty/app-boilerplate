@@ -67,6 +67,15 @@ export const en = {
     saveFailed: 'Failed to save role',
     deleteFailed: 'Failed to delete role',
   },
+  users: {
+    colUser: 'User',
+    colEmail: 'Email',
+    colRole: 'Role',
+    colJoined: 'Joined',
+    colActions: 'Role',
+    assignRole: 'Assign role',
+    empty: 'No users yet.',
+  },
   language: {
     label: 'Language',
   },
