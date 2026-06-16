@@ -77,6 +77,15 @@
       ]
     },
     {
+      "name": "n8n",
+      "type": "registry:lib",
+      "title": "n8n webhook client",
+      "description": "Helper that builds n8n webhook URLs from VITE_N8N_WEBHOOK_URL / VITE_N8N_BASE_URL (never hardcoded) and POSTs payloads to them.",
+      "files": [
+        { "path": "registry/lib/n8n.ts", "type": "registry:lib", "target": "src/lib/n8n.ts" }
+      ]
+    },
+    {
       "name": "i18n",
       "type": "registry:block",
       "title": "Internationalization (i18n)",
