@@ -1,0 +1,74 @@
+name: tillforty-app
+
+services:
+  # ── Postgres (with pgvector + pgcrypto) ──────────────────────────────────
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── One-shot SQL migrations (run in numeric order, then exit) ────────────
+  migrate:
+    image: postgres:16-alpine
+    restart: "no"
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./migrations:/migrations:ro
+    entrypoint: ["sh", "-c"]
+    command:
+      - |
+        set -e
+        echo "Running migrations in order against $$DATABASE_URL"
+        for f in /migrations/0*.sql; do
+          echo "→ applying $$f"
+          psql "$$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$$f"
+        done
+        echo "Migrations complete."
+
+  # ── FastAPI backend ──────────────────────────────────────────────────────
+  api:
+    build: ./backend
+    restart: unless-stopped
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    volumes:
+      - storage:/srv/storage
+    ports:
+      - "${API_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # ── React frontend (nginx serving the built SPA + /api proxy) ────────────
+  web:
+    build: ./web
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "${WEB_PORT:-8080}:80"
+
+volumes:
+  pgdata:
+  storage:

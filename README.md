@@ -6,6 +6,65 @@ A full-stack starter shared across Tillforty apps:
 - **Backend** — a FastAPI template with **users + JWT auth**, an **encrypted secret vault** (pgcrypto), and **file storage** (binaries on disk, metadata in Postgres).
 - **Database** — the SQL migrations every app needs to provision the above.
 
+---
+
+## 🚀 Run the whole stack with one command
+
+A Dockerized, self-contained runtime is included so the entire boilerplate —
+Postgres (with pgcrypto + pgvector), the SQL migrations, the FastAPI backend, and
+a real React (Vite) frontend built from the registry — launches with a single
+command. The **only host requirement is Docker + the Compose plugin**.
+
+```bash
+./start.sh
+```
+
+On first run this:
+
+1. Creates `.env` from `.env.example` and **auto-generates** the database password,
+   `JWT_SECRET`, `VAULT_KEY`, and the seed admin password (printed once).
+2. Builds the images and starts the services in order:
+   **Postgres → migrations (run in numeric order) → API → web**.
+3. Waits for the API's `/ready` check, then prints the URLs + admin login.
+
+| Service | URL (default ports) |
+| --- | --- |
+| Web UI (React) | http://localhost:8080 |
+| API (direct) | http://localhost:8000 |
+| API docs (Swagger) | http://localhost:8080/api/docs — also linked from the UI |
+
+> The API runs with `--root-path /api`, so Swagger UI loads its schema through the
+> `/api` proxy. Use **http://localhost:8080/api/docs** (via the web service); the
+> raw `:8000/docs` page can't resolve its `openapi.json` on its own.
+
+Other commands:
+
+```bash
+./start.sh logs       # follow logs
+./start.sh down       # stop everything (keeps the database + uploaded files)
+./start.sh destroy    # stop AND delete the data volumes (full reset)
+```
+
+Override the host ports by editing `WEB_PORT` / `API_PORT` in `.env`. The LLM keys
+(`EMBEDDING_API_KEY`, `OPERATING_AGENT_API_KEY`) are left as `CHANGE_ME` — the app
+runs fine without them; fill them in `.env` to enable embeddings / the LLM agent.
+
+What the runtime adds on top of the registry (all generated, editable source):
+
+- **`web/`** — a Vite + React + TypeScript app that already consumes the registry
+  blocks (theme, i18n, auth, app-shell, roles) with the shadcn UI primitives
+  vendored in `web/src/components/ui`. Routes: `/login`, `/` (dashboard),
+  `/profile`, `/settings/users`, `/settings/roles`, plus the OAuth callback.
+- **`docker-compose.yml`**, **`backend/Dockerfile`**, **`web/Dockerfile`** +
+  `web/nginx.conf` (serves the SPA and proxies `/api` to the backend).
+- **`start.sh`** — the launcher above.
+
+> Note: the sections below document the boilerplate as a **distributable registry +
+> backend template** (pulling pieces into a separate app). The Docker runtime above
+> is the batteries-included way to stand the whole thing up as one application.
+
+---
+
 ```
 app-boilerplate/
 ├─ .env.example         # consolidated env template (root, full-stack)
