@@ -9,7 +9,7 @@ import os
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
-from . import db, files, roles, vault, vectors
+from . import db, files, oauth, roles, vault, vectors
 from .auth import ensure_schema_and_seed, router as auth_router
 
 DATABASE_URL = os.environ["DATABASE_URL"]
@@ -34,6 +34,7 @@ async def shutdown() -> None:
 
 
 app.include_router(auth_router)
+app.include_router(oauth.router)
 app.include_router(roles.router)
 app.include_router(vault.router)
 app.include_router(files.router)

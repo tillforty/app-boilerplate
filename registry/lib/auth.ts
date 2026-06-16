@@ -77,3 +77,26 @@ export async function changePassword(
 export async function listUsers(): Promise<User[]> {
   return api.get<User[]>('/auth/users')
 }
+
+export interface AuthProvider {
+  id: string // 'google' | 'microsoft' | ...
+  name: string
+}
+
+/** Which SSO providers the backend has configured (empty if none). */
+export async function getAuthProviders(): Promise<AuthProvider[]> {
+  return api.get<AuthProvider[]>('/auth/oauth/providers')
+}
+
+/** Full-page URL that kicks off the provider's OAuth flow. */
+export function oauthLoginUrl(provider: string): string {
+  return `/api/auth/oauth/${provider}/login`
+}
+
+/** Finish an SSO login: store the token from the callback, then load the user. */
+export async function completeOAuthLogin(token: string): Promise<User> {
+  localStorage.setItem(TOKEN_KEY, token)
+  const user = await fetchMe()
+  localStorage.setItem(USER_KEY, JSON.stringify(user))
+  return user
+}

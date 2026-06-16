@@ -18,8 +18,8 @@ app-boilerplate/
 ├─ registry.json        # registry manifest (`shadcn build` → /r/*.json)
 ├─ tailwind-preset.js   # shared Tailwind theme preset
 ├─ components.json.example
-├─ backend/             # FastAPI app: auth + roles + vault + files + vectors + llm
-│  ├─ app/{db,security,auth,roles,vault,files,vectors,llm,main}.py
+├─ backend/             # FastAPI app: auth + oauth + roles + vault + files + vectors + llm
+│  ├─ app/{db,security,auth,oauth,roles,vault,files,vectors,llm,main}.py
 │  ├─ requirements.txt
 │  └─ .env.example
 └─ migrations/          # SQL — run in order
@@ -187,6 +187,34 @@ On the frontend, `pull` the `roles` block, then wrap your app in
 </AuthProvider>
 ```
 
+### Single sign-on (Google / Microsoft)
+
+Optional and **config-driven**: set a provider's `CLIENT_ID` + `CLIENT_SECRET`
+and its button automatically appears on the login screen (the frontend asks
+`GET /auth/oauth/providers` which only returns configured providers). Leave them
+blank and no button shows. Flow: `GET /auth/oauth/{provider}/login` → provider →
+`GET /auth/oauth/{provider}/callback` → user matched/created by email (given the
+`member` role), our JWT issued, browser redirected to `OAUTH_POST_LOGIN_URL` with
+the token in the URL fragment.
+
+Register this exact redirect URI in each provider console:
+`{OAUTH_REDIRECT_BASE_URL}/api/auth/oauth/{google|microsoft}/callback`.
+
+The `auth` block ships `LoginPage` (email/password + SSO buttons) and
+`OAuthCallback`. Wire the callback route **outside** `ProtectedRoute`:
+
+```tsx
+<Route path="/login" element={<LoginPage />} />
+<Route path="/auth/callback" element={<OAuthCallback />} />   {/* public */}
+```
+
+### API docs
+
+FastAPI's interactive docs are served at **`/api/docs`** (run uvicorn with
+`--root-path /api`). They're linked from the settings menu (`apiDocsUrl` in
+`app-config.tsx`). To lock them down, pass `docs_url=None` to `FastAPI(...)` and
+re-serve behind your own auth.
+
 ### Internationalization (i18n)
 
 Dependency-free. Pull the `i18n` block, wrap your app in `I18nProvider`, and use
@@ -257,8 +285,20 @@ answer = await llm.complete([
    ```
 
    Files land as editable source under `src/`. Edit **`src/config/app-config.tsx`**
-   to set your brand (name, logo, initial) and nav items — that's the only file
-   you're expected to customize in the shell.
+   to set your brand and nav — that's the only file you customize in the shell:
+
+   - `brand.logoSrc` / `brand.name` / `brand.initial` — the system logo.
+   - `brand.primary` — the system-wide primary color as HSL channels
+     (`"H S% L%"`). Call `applyBrandTheme()` once in `main.tsx` so it applies
+     everywhere (incl. the login screen); the app shell re-applies it on mount.
+   - `nav` / `settingsNav` — menu items. The settings menu includes an **API
+     Docs** entry (an `external` link to `apiDocsUrl`, default `/api/docs`).
+
+   ```tsx
+   // main.tsx
+   import { applyBrandTheme } from '@/config/app-config'
+   applyBrandTheme()
+   ```
 
 4. **Wire it up** in your router:
 

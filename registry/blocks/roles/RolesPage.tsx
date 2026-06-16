@@ -12,6 +12,7 @@ import {
   type PermissionCatalog,
 } from '@/lib/roles'
 import { usePermissions } from '@/context/PermissionsContext'
+import { useTranslation } from '@/i18n'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
@@ -43,6 +44,7 @@ interface EditState {
 const ADMIN = 'administrator'
 
 export default function RolesPage() {
+  const { t } = useTranslation()
   const { can, refresh: refreshMine } = usePermissions()
   const canManage = can('roles:manage')
 
@@ -60,7 +62,7 @@ export default function RolesPage() {
       setRoles(r)
       setCatalog(c)
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load roles')
+      setError(e instanceof Error ? e.message : t('roles.loadFailed'))
     } finally {
       setLoading(false)
     }
@@ -115,20 +117,20 @@ export default function RolesPage() {
       await load()
       await refreshMine() // your own permissions may have changed
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to save role')
+      setError(e instanceof Error ? e.message : t('roles.saveFailed'))
     } finally {
       setSaving(false)
     }
   }
 
   async function remove(role: Role) {
-    if (!window.confirm(`Delete role "${role.name}"? This cannot be undone.`)) return
+    if (!window.confirm(t('roles.deleteConfirm', { name: role.name }))) return
     setError(null)
     try {
       await deleteRole(role.id)
       await load()
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to delete role')
+      setError(e instanceof Error ? e.message : t('roles.deleteFailed'))
     }
   }
 
@@ -140,15 +142,13 @@ export default function RolesPage() {
     <div className="mx-auto max-w-5xl space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold">Roles &amp; permissions</h1>
-          <p className="text-sm text-muted-foreground">
-            Define roles and pick the functions each one can perform.
-          </p>
+          <h1 className="text-2xl font-semibold">{t('roles.title')}</h1>
+          <p className="text-sm text-muted-foreground">{t('roles.subtitle')}</p>
         </div>
         {canManage && (
           <Button onClick={startCreate}>
             <Plus className="mr-2 h-4 w-4" />
-            New role
+            {t('roles.newRole')}
           </Button>
         )}
       </div>
@@ -160,7 +160,7 @@ export default function RolesPage() {
       )}
 
       {loading ? (
-        <p className="text-sm text-muted-foreground">Loading…</p>
+        <p className="text-sm text-muted-foreground">{t('common.loading')}</p>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2">
           {roles.map((role) => (
@@ -174,11 +174,11 @@ export default function RolesPage() {
                       {role.is_system && (
                         <Badge variant="secondary" className="gap-1">
                           <Lock className="h-3 w-3" />
-                          System
+                          {t('roles.system')}
                         </Badge>
                       )}
                     </CardTitle>
-                    <CardDescription>{role.description || '—'}</CardDescription>
+                    <CardDescription>{role.description || t('common.none')}</CardDescription>
                   </div>
                   {canManage && (
                     <div className="flex shrink-0 gap-1">
@@ -189,7 +189,7 @@ export default function RolesPage() {
                         variant="ghost"
                         size="icon"
                         disabled={role.is_system}
-                        title={role.is_system ? 'System roles cannot be deleted' : 'Delete role'}
+                        title={role.is_system ? t('roles.system') : t('common.delete')}
                         onClick={() => remove(role)}
                       >
                         <Trash2 className="h-4 w-4" />
@@ -200,7 +200,7 @@ export default function RolesPage() {
               </CardHeader>
               <CardContent>
                 {role.permissions.includes(WILDCARD) ? (
-                  <Badge>Full access</Badge>
+                  <Badge>{t('roles.fullAccess')}</Badge>
                 ) : role.permissions.length ? (
                   <div className="flex flex-wrap gap-1">
                     {role.permissions.map((p) => (
@@ -210,7 +210,7 @@ export default function RolesPage() {
                     ))}
                   </div>
                 ) : (
-                  <span className="text-sm text-muted-foreground">No permissions</span>
+                  <span className="text-sm text-muted-foreground">{t('roles.noPermissions')}</span>
                 )}
               </CardContent>
             </Card>
@@ -221,39 +221,39 @@ export default function RolesPage() {
       <Dialog open={!!edit} onOpenChange={(o) => !o && setEdit(null)}>
         <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>{edit?.role ? `Edit ${edit.role.name}` : 'New role'}</DialogTitle>
-            <DialogDescription>
-              Tick the functions and actions this role is allowed to perform.
-            </DialogDescription>
+            <DialogTitle>
+              {edit?.role ? t('roles.editRole', { name: edit.role.name }) : t('roles.newRole')}
+            </DialogTitle>
+            <DialogDescription>{t('roles.dialogHint')}</DialogDescription>
           </DialogHeader>
 
           {edit && (
             <div className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="role-name">Name</Label>
+                <Label htmlFor="role-name">{t('roles.name')}</Label>
                 <Input
                   id="role-name"
                   value={edit.name}
                   disabled={nameLocked}
                   onChange={(e) => setEdit({ ...edit, name: e.target.value })}
-                  placeholder="e.g. editor"
+                  placeholder={t('roles.namePlaceholder')}
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="role-desc">Description</Label>
+                <Label htmlFor="role-desc">{t('roles.description')}</Label>
                 <Input
                   id="role-desc"
                   value={edit.description}
                   onChange={(e) => setEdit({ ...edit, description: e.target.value })}
-                  placeholder="What is this role for?"
+                  placeholder={t('roles.descPlaceholder')}
                 />
               </div>
 
               <div className="space-y-3">
-                <Label>Permissions</Label>
+                <Label>{t('roles.permissions')}</Label>
                 {permsLocked ? (
                   <p className="rounded-md bg-muted px-3 py-2 text-sm text-muted-foreground">
-                    The administrator role always has full access — its permissions are locked.
+                    {t('roles.adminLocked')}
                   </p>
                 ) : (
                   catalog?.catalog.map((group) => (
@@ -282,10 +282,10 @@ export default function RolesPage() {
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setEdit(null)} disabled={saving}>
-              Cancel
+              {t('common.cancel')}
             </Button>
             <Button onClick={save} disabled={saving || !edit?.name.trim()}>
-              {saving ? 'Saving…' : 'Save'}
+              {saving ? t('common.saving') : t('common.save')}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -27,13 +27,15 @@
       "name": "auth",
       "type": "registry:block",
       "title": "Auth scaffold",
-      "description": "JWT auth: context provider, protected route, and auth API helpers.",
-      "registryDependencies": ["lib"],
+      "description": "JWT auth + optional Google/Microsoft SSO: context provider, protected route, login page, OAuth callback, and auth API helpers.",
+      "registryDependencies": ["lib", "i18n", "button", "input", "label", "card"],
       "dependencies": ["react-router-dom"],
       "files": [
         { "path": "registry/lib/auth.ts", "type": "registry:lib", "target": "src/lib/auth.ts" },
         { "path": "registry/blocks/auth/AuthContext.tsx", "type": "registry:component", "target": "src/context/AuthContext.tsx" },
-        { "path": "registry/blocks/auth/ProtectedRoute.tsx", "type": "registry:component", "target": "src/components/ProtectedRoute.tsx" }
+        { "path": "registry/blocks/auth/ProtectedRoute.tsx", "type": "registry:component", "target": "src/components/ProtectedRoute.tsx" },
+        { "path": "registry/blocks/auth/LoginPage.tsx", "type": "registry:component", "target": "src/pages/LoginPage.tsx" },
+        { "path": "registry/blocks/auth/OAuthCallback.tsx", "type": "registry:component", "target": "src/pages/OAuthCallback.tsx" }
       ]
     },
     {
@@ -43,6 +45,7 @@
       "description": "Authenticated app shell. Branding + nav live in src/config/app-config.tsx.",
       "registryDependencies": [
         "auth",
+        "i18n",
         "button",
         "avatar",
         "dropdown-menu",
@@ -64,7 +67,7 @@
       "type": "registry:block",
       "title": "Roles & permissions (RBAC)",
       "description": "Role management UI with permission checkboxes, a usePermissions hook, and a PermissionGate. Pairs with the backend roles router.",
-      "registryDependencies": ["auth", "button", "card", "dialog", "checkbox", "input", "label", "badge"],
+      "registryDependencies": ["auth", "i18n", "button", "card", "dialog", "checkbox", "input", "label", "badge"],
       "dependencies": ["lucide-react"],
       "files": [
         { "path": "registry/lib/roles.ts", "type": "registry:lib", "target": "src/lib/roles.ts" },

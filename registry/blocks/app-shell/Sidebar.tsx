@@ -8,6 +8,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { appConfig, type NavItem } from '@/config/app-config'
+import { useTranslation } from '@/i18n'
 
 interface SidebarProps {
   collapsed: boolean
@@ -18,21 +19,29 @@ interface SidebarProps {
 
 function NavLink({ item, collapsed }: { item: NavItem; collapsed: boolean }) {
   const location = useLocation()
-  const isActive = location.pathname === item.href
+  const isActive = !item.external && location.pathname === item.href
   const Icon = item.icon
 
-  const linkContent = (
-    <Link
-      to={item.href}
-      className={cn(
-        'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
-        'text-sidebar-foreground hover:bg-sidebar-primary hover:text-sidebar-primary-foreground',
-        isActive && 'bg-sidebar-primary text-sidebar-primary-foreground',
-        collapsed && 'justify-center px-2',
-      )}
-    >
+  const className = cn(
+    'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+    'text-sidebar-foreground hover:bg-sidebar-primary hover:text-sidebar-primary-foreground',
+    isActive && 'bg-sidebar-primary text-sidebar-primary-foreground',
+    collapsed && 'justify-center px-2',
+  )
+  const inner = (
+    <>
       <Icon className="h-5 w-5 shrink-0" />
       {!collapsed && <span>{item.label}</span>}
+    </>
+  )
+
+  const linkContent = item.external ? (
+    <a href={item.href} target="_blank" rel="noopener noreferrer" className={className}>
+      {inner}
+    </a>
+  ) : (
+    <Link to={item.href} className={className}>
+      {inner}
     </Link>
   )
 
@@ -51,6 +60,7 @@ function NavLink({ item, collapsed }: { item: NavItem; collapsed: boolean }) {
 function SidebarContent({ collapsed }: { collapsed?: boolean }) {
   const isCollapsed = collapsed ?? false
   const { user } = useAuth()
+  const { t } = useTranslation()
   const { brand, nav, settingsNav } = appConfig
   const fullName = user ? `${user.name} ${user.surname}`.trim() : 'User'
   const initials = user
@@ -89,7 +99,7 @@ function SidebarContent({ collapsed }: { collapsed?: boolean }) {
             <div className="pt-4">
               {!isCollapsed && (
                 <p className="px-3 pb-1 text-xs font-semibold uppercase tracking-wider text-sidebar-foreground/50">
-                  Settings
+                  {t('nav.settings')}
                 </p>
               )}
               {settingsNav.map((item) => (
@@ -121,6 +131,7 @@ function SidebarContent({ collapsed }: { collapsed?: boolean }) {
 }
 
 export default function Sidebar({ collapsed, onCollapse, mobileOpen, onMobileClose }: SidebarProps) {
+  const { t } = useTranslation()
   return (
     <>
       {/* Desktop sidebar */}
@@ -150,7 +161,7 @@ export default function Sidebar({ collapsed, onCollapse, mobileOpen, onMobileClo
       <Sheet open={mobileOpen} onOpenChange={(open) => !open && onMobileClose()}>
         <SheetContent side="left" className="w-64 bg-sidebar p-0 text-sidebar-foreground">
           <SheetHeader className="sr-only">
-            <SheetTitle>Navigation</SheetTitle>
+            <SheetTitle>{t('nav.navigation')}</SheetTitle>
           </SheetHeader>
           <TooltipProvider delayDuration={0}>
             <SidebarContent collapsed={false} />

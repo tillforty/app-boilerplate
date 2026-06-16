@@ -13,11 +13,14 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
 import { appConfig } from '@/config/app-config'
+import { useTranslation } from '@/i18n'
+import { LanguageSwitcher } from '@/i18n/LanguageSwitcher'
 
 export default function Header() {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
+  const { t } = useTranslation()
   const { brand, nav } = appConfig
 
   const fullName = user ? `${user.name} ${user.surname}`.trim() : 'User'
@@ -61,23 +64,25 @@ export default function Header() {
 
       {/* Right side */}
       <div className="flex items-center gap-2">
+        <LanguageSwitcher />
+
         {/* Settings icon with dropdown */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" aria-label="Settings menu">
+            <Button variant="ghost" size="icon" aria-label={t('nav.settings')}>
               <Settings className="h-5 w-5 text-gray-500" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-48">
             <DropdownMenuItem onClick={() => navigate('/settings/users')}>
               <User className="mr-2 h-4 w-4" />
-              Users
+              {t('nav.users')}
             </DropdownMenuItem>
             <DropdownMenuItem
-              onClick={() => window.open('/api/docs', '_blank', 'noopener,noreferrer')}
+              onClick={() => window.open(appConfig.apiDocsUrl, '_blank', 'noopener,noreferrer')}
             >
               <BookOpen className="mr-2 h-4 w-4" />
-              API Docs
+              {t('nav.apiDocs')}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -104,11 +109,11 @@ export default function Header() {
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={() => navigate('/profile')}>
               <User className="mr-2 h-4 w-4" />
-              Profile
+              {t('nav.profile')}
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => navigate('/settings/users')}>
               <Settings className="mr-2 h-4 w-4" />
-              Settings
+              {t('nav.settings')}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem
@@ -116,7 +121,7 @@ export default function Header() {
               onClick={handleSignOut}
             >
               <LogOut className="mr-2 h-4 w-4" />
-              Sign out
+              {t('nav.signOut')}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
