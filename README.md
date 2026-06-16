@@ -17,15 +17,16 @@ app-boilerplate/
 ├─ registry.json        # registry manifest (`shadcn build` → /r/*.json)
 ├─ tailwind-preset.js   # shared Tailwind theme preset
 ├─ components.json.example
-├─ backend/             # FastAPI app: auth + vault + files
-│  ├─ app/{db,security,auth,vault,files,main}.py
+├─ backend/             # FastAPI app: auth + vault + files + vectors + llm
+│  ├─ app/{db,security,auth,vault,files,vectors,llm,main}.py
 │  ├─ requirements.txt
 │  └─ .env.example
 └─ migrations/          # SQL — run in order
    ├─ 0001_extensions.sql
    ├─ 0002_users.sql
    ├─ 0003_files.sql
-   └─ 0004_vault.sql
+   ├─ 0004_vault.sql
+   └─ 0005_pgvector.sql
 ```
 
 ---
@@ -37,8 +38,8 @@ backend also creates these tables idempotently on startup (`ensure_schema*`), so
 the files double as documentation of the canonical schema.
 
 ```bash
-# all four, in order
-for f in migrations/0001_*.sql migrations/0002_*.sql migrations/0003_*.sql migrations/0004_*.sql; do
+# all of them, in order
+for f in migrations/0*.sql; do
   psql "$DATABASE_URL" -f "$f"
 done
 ```
@@ -84,6 +85,10 @@ CREATE TABLE IF NOT EXISTS vault_secrets (
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now()
 );
+
+-- 0005_pgvector.sql — embedding columns + nearest-neighbour search. Embeddings
+-- live on domain tables (no standalone table); column width = EMBEDDING_DIM.
+CREATE EXTENSION IF NOT EXISTS vector;
 ```
 
 **Storage vs. encryption — two different concerns:**
@@ -140,6 +145,28 @@ Endpoints out of the box: `/auth/login`, `/auth/logout`, `/auth/me`,
 `/ready`. Add your own routers in `app/main.py`. Required env vars are documented
 in `backend/.env.example` (`DATABASE_URL`, `JWT_SECRET`, `VAULT_KEY`,
 `STORAGE_DIR`, and the `SEED_USER_*` for the first user).
+
+### Embeddings + LLM
+
+`app/vectors.py` installs pgvector on startup and exposes `to_vector(embedding)`
+to format a float list as a pgvector literal (validated against `EMBEDDING_DIM`).
+`app/llm.py` is a provider-agnostic client (OpenAI SDK; point `*_BASE_URL` at any
+OpenAI-compatible endpoint). Embeddings go on your own domain tables — store with
+`to_vector`, search with `<=>`:
+
+```python
+from app import llm, vectors
+
+vec = vectors.to_vector(await llm.embed_one("some text"))
+await db.get_pool().execute(
+    "UPDATE products SET embedding = $2 WHERE id = $1", product_id, vec
+)
+
+answer = await llm.complete([
+    {"role": "system", "content": "You are a helpful assistant."},
+    {"role": "user", "content": "Summarize this BOQ."},
+])
+```
 
 ---
 
