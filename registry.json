@@ -1,0 +1,63 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry.json",
+  "name": "tillforty",
+  "homepage": "https://github.com/tillforty/app-boilerplate",
+  "items": [
+    {
+      "name": "theme",
+      "type": "registry:file",
+      "title": "Tillforty theme tokens",
+      "description": "CSS variables + base layer for the Tillforty design system.",
+      "files": [
+        { "path": "registry/theme/tokens.css", "type": "registry:file", "target": "src/index.css" }
+      ]
+    },
+    {
+      "name": "lib",
+      "type": "registry:lib",
+      "title": "Core lib (cn + API client)",
+      "description": "cn() helper and the authed fetch API client.",
+      "dependencies": ["clsx", "tailwind-merge"],
+      "files": [
+        { "path": "registry/lib/utils.ts", "type": "registry:lib", "target": "src/lib/utils.ts" },
+        { "path": "registry/lib/api.ts", "type": "registry:lib", "target": "src/lib/api.ts" }
+      ]
+    },
+    {
+      "name": "auth",
+      "type": "registry:block",
+      "title": "Auth scaffold",
+      "description": "JWT auth: context provider, protected route, and auth API helpers.",
+      "registryDependencies": ["lib"],
+      "dependencies": ["react-router-dom"],
+      "files": [
+        { "path": "registry/lib/auth.ts", "type": "registry:lib", "target": "src/lib/auth.ts" },
+        { "path": "registry/blocks/auth/AuthContext.tsx", "type": "registry:component", "target": "src/context/AuthContext.tsx" },
+        { "path": "registry/blocks/auth/ProtectedRoute.tsx", "type": "registry:component", "target": "src/components/ProtectedRoute.tsx" }
+      ]
+    },
+    {
+      "name": "app-shell",
+      "type": "registry:block",
+      "title": "App shell (layout + header + sidebar)",
+      "description": "Authenticated app shell. Branding + nav live in src/config/app-config.tsx.",
+      "registryDependencies": [
+        "auth",
+        "button",
+        "avatar",
+        "dropdown-menu",
+        "scroll-area",
+        "tooltip",
+        "sheet",
+        "separator"
+      ],
+      "dependencies": ["lucide-react", "react-router-dom"],
+      "files": [
+        { "path": "registry/config/app-config.tsx", "type": "registry:component", "target": "src/config/app-config.tsx" },
+        { "path": "registry/blocks/app-shell/AppLayout.tsx", "type": "registry:component", "target": "src/components/layout/AppLayout.tsx" },
+        { "path": "registry/blocks/app-shell/Header.tsx", "type": "registry:component", "target": "src/components/layout/Header.tsx" },
+        { "path": "registry/blocks/app-shell/Sidebar.tsx", "type": "registry:component", "target": "src/components/layout/Sidebar.tsx" }
+      ]
+    }
+  ]
+}
