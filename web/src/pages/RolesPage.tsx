@@ -140,13 +140,13 @@ export default function RolesPage() {
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold">{t('roles.title')}</h1>
           <p className="text-sm text-muted-foreground">{t('roles.subtitle')}</p>
         </div>
         {canManage && (
-          <Button onClick={startCreate}>
+          <Button onClick={startCreate} className="w-full sm:w-auto">
             <Plus className="mr-2 h-4 w-4" />
             {t('roles.newRole')}
           </Button>
