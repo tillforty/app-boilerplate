@@ -1,5 +1,6 @@
+import { useEffect, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { Settings, LogOut, User, ChevronDown, BookOpen } from 'lucide-react'
+import { Settings, LogOut, User, ChevronDown, BookOpen, Menu } from 'lucide-react'
 import { useAuth } from '@/context/AuthContext'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
@@ -11,8 +12,14 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet'
 import { cn } from '@/lib/utils'
-import { appConfig } from '@/config/app-config'
+import { appConfig, type NavItem } from '@/config/app-config'
 import { useTranslation } from '@/i18n'
 import { LanguageSwitcher } from '@/i18n/LanguageSwitcher'
 
@@ -21,7 +28,13 @@ export default function Header() {
   const navigate = useNavigate()
   const location = useLocation()
   const { t } = useTranslation()
-  const { brand, nav } = appConfig
+  const { brand, nav, settingsNav } = appConfig
+  const [mobileOpen, setMobileOpen] = useState(false)
+
+  // Close the mobile nav whenever the route changes.
+  useEffect(() => {
+    setMobileOpen(false)
+  }, [location.pathname])
 
   const fullName = user ? `${user.name} ${user.surname}`.trim() : 'User'
   const initials = user
@@ -37,15 +50,50 @@ export default function Header() {
     return href === '/' ? location.pathname === '/' : location.pathname.startsWith(href)
   }
 
-  return (
-    <header className="grid h-14 grid-cols-[auto_1fr_auto] items-center gap-6 border-b bg-white px-6">
-      {/* Logo */}
-      <Link to="/" className="flex items-center shrink-0">
-        <img src={brand.logoSrc} alt={brand.name} className="h-5" />
+  function MobileNavLink({ item }: { item: NavItem }) {
+    const Icon = item.icon
+    const className = cn(
+      'flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors',
+      isActive(item.href)
+        ? 'bg-primary text-primary-foreground'
+        : 'text-gray-700 hover:bg-muted',
+    )
+    if (item.external) {
+      return (
+        <a href={item.href} target="_blank" rel="noopener noreferrer" className={className}>
+          <Icon className="h-5 w-5 shrink-0" />
+          {item.label}
+        </a>
+      )
+    }
+    return (
+      <Link to={item.href} className={className}>
+        <Icon className="h-5 w-5 shrink-0" />
+        {item.label}
       </Link>
+    )
+  }
 
-      {/* Horizontal nav — centered, driven by app-config */}
-      <nav className="flex items-center justify-center gap-1">
+  return (
+    <header className="grid h-14 grid-cols-[auto_1fr_auto] items-center gap-3 border-b bg-white px-4 md:gap-6 md:px-6">
+      {/* Left: mobile menu trigger + logo */}
+      <div className="flex items-center gap-2">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="md:hidden"
+          aria-label={t('nav.navigation')}
+          onClick={() => setMobileOpen(true)}
+        >
+          <Menu className="h-5 w-5 text-gray-600" />
+        </Button>
+        <Link to="/" className="flex items-center shrink-0">
+          <img src={brand.logoSrc} alt={brand.name} className="h-5" />
+        </Link>
+      </div>
+
+      {/* Horizontal nav — centered, driven by app-config. Hidden on mobile. */}
+      <nav className="hidden items-center justify-center gap-1 md:flex">
         {nav.map((item) => (
           <Link
             key={item.href}
@@ -63,7 +111,7 @@ export default function Header() {
       </nav>
 
       {/* Right side */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1 sm:gap-2">
         <LanguageSwitcher />
 
         {/* Settings icon with dropdown */}
@@ -96,7 +144,7 @@ export default function Header() {
                   {initials}
                 </AvatarFallback>
               </Avatar>
-              <ChevronDown className="h-3 w-3 text-gray-500" />
+              <ChevronDown className="hidden h-3 w-3 text-gray-500 sm:block" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-56">
@@ -126,6 +174,31 @@ export default function Header() {
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+
+      {/* Mobile navigation drawer */}
+      <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
+        <SheetContent side="left" className="w-72 p-0">
+          <SheetHeader className="border-b px-4 py-3 text-left">
+            <SheetTitle className="flex items-center">
+              <img src={brand.logoSrc} alt={brand.name} className="h-6" />
+            </SheetTitle>
+          </SheetHeader>
+          <nav className="space-y-1 p-3">
+            {nav.map((item) => (
+              <MobileNavLink key={item.href} item={item} />
+            ))}
+
+            <div className="pt-3">
+              <p className="px-3 pb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                {t('nav.settings')}
+              </p>
+              {settingsNav.map((item) => (
+                <MobileNavLink key={item.href} item={item} />
+              ))}
+            </div>
+          </nav>
+        </SheetContent>
+      </Sheet>
     </header>
   )
 }

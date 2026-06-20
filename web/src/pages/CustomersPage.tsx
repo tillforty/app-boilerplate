@@ -136,14 +136,14 @@ export default function CustomersPage() {
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold">Customers</h1>
           <p className="text-sm text-muted-foreground">
             A CRM-style example: table, search, filters, tabs, and full CRUD on dummy data.
           </p>
         </div>
-        <Button onClick={openCreate}>
+        <Button onClick={openCreate} className="w-full sm:w-auto">
           <Plus className="mr-2 h-4 w-4" />
           Add customer
         </Button>
@@ -182,7 +182,11 @@ export default function CustomersPage() {
             onChange={(e) => setQuery(e.target.value)}
           />
         </div>
-        <Tabs value={tab} onValueChange={(v) => setTab(v as 'all' | CustomerStatus)}>
+        <Tabs
+          value={tab}
+          onValueChange={(v) => setTab(v as 'all' | CustomerStatus)}
+          className="-mx-4 max-w-full overflow-x-auto px-4 sm:mx-0 sm:px-0"
+        >
           <TabsList>
             <TabsTrigger value="all">All</TabsTrigger>
             {CUSTOMER_STATUSES.map((s) => (
