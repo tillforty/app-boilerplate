@@ -19,6 +19,33 @@ command. The **only host requirement is Docker + the Compose plugin**.
 ./start.sh
 ```
 
+### Full Ubuntu setup (interactive wizard)
+
+If you're on a fresh Ubuntu server, run the interactive setup wizard. It installs
+Docker, walks through every configuration option (domain, admin account, n8n,
+SMTP, LLM keys), writes `.env`, and starts the stack — all in one shot:
+
+```bash
+# From the internet (fresh server, nothing cloned yet):
+bash <(curl -fsSL https://raw.githubusercontent.com/tillforty/app-boilerplate/main/setup.sh)
+
+# Or if you've already cloned the repo:
+./setup.sh
+```
+
+The wizard covers:
+
+| Step | What it configures |
+| --- | --- |
+| 1. Deployment | Domain name, Let's Encrypt email, host ports |
+| 2. Database | App Postgres password |
+| 3. Admin account | Email, name, auto-generated password |
+| 4. Security | JWT secret, Vault encryption key (auto or manual) |
+| 5. n8n | Enable/disable, port, timezone, basic-auth |
+| 6. Integrations | SMTP outbound email, LLM/AI API keys |
+
+At the end it prints a summary and asks whether to start now.
+
 On first run this:
 
 1. Creates `.env` from `.env.example` and **auto-generates** the database password,
@@ -62,6 +89,54 @@ and brings up the stack behind a Caddy reverse proxy that auto-provisions a Let'
 Encrypt certificate — leaving the app live at `https://app.tillforty.com`. It's
 idempotent (re-run = `git pull` + rebuild, data preserved). Full walkthrough,
 tunables, and the manual path: **[DEPLOY.md](DEPLOY.md)**.
+
+### n8n Workflow Automation
+
+n8n is included as an optional service with its own dedicated Postgres database.
+Enable it in `.env`:
+
+```bash
+N8N_ENABLED=true        # bring up n8n + n8n_postgres on ./start.sh
+N8N_PORT=5678           # host port (default 5678)
+TIMEZONE=Europe/Vilnius # for schedule triggers
+```
+
+Or enable it interactively via `./setup.sh`. When running, n8n is available at
+`http://localhost:5678` (or `https://your-domain:5678` in production).
+
+The app backend talks to n8n through `backend/app/n8n.py` — set `N8N_BASE_URL`
+and `N8N_WEBHOOK_URL` in `.env` to wire them up. Webhook URLs in the frontend
+use `VITE_N8N_BASE_URL` / `VITE_N8N_WEBHOOK_URL`.
+
+> **Note:** n8n's `N8N_ENCRYPTION_KEY` is auto-generated on first run. Rotating
+> it breaks all stored credentials in n8n — treat it like `VAULT_KEY`.
+
+### Backups
+
+```bash
+./backup.sh              # dump app DB to ./backups/
+./backup.sh --n8n        # also dump n8n DB
+./backup.sh --upload     # upload to S3/R2 after backup (needs AWS_* vars in .env)
+./backup.sh --restore backups/app_20240101_030000.sql.gz   # restore app DB
+```
+
+Backups are gzip-compressed `.sql.gz` files. Local copies older than 14 days are
+pruned automatically. To run daily at 3 AM:
+
+```bash
+echo "0 3 * * * /opt/app-boilerplate/backup.sh --n8n --upload >> /var/log/app-backup.log 2>&1" | crontab -
+```
+
+For S3/R2 uploads add to `.env`:
+
+```bash
+S3_BUCKET=my-backups
+S3_PREFIX=app            # path prefix inside the bucket
+AWS_ACCESS_KEY_ID=...
+AWS_SECRET_ACCESS_KEY=...
+AWS_DEFAULT_REGION=auto
+AWS_ENDPOINT_URL=https://....r2.cloudflarestorage.com  # Cloudflare R2 / MinIO / etc.
+```
 
 What the runtime adds on top of the registry (all generated, editable source):
 

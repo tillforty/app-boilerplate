@@ -69,6 +69,53 @@ services:
     ports:
       - "${WEB_PORT:-8080}:80"
 
+  # ── n8n Postgres (separate DB for n8n) ──────────────────────────────────
+  # n8n requires its own database — never share with the app DB.
+  n8n_postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    profiles: ["n8n"]
+    environment:
+      POSTGRES_USER: ${N8N_POSTGRES_USER:-n8n}
+      POSTGRES_PASSWORD: ${N8N_POSTGRES_PASSWORD:-CHANGE_ME}
+      POSTGRES_DB: ${N8N_POSTGRES_DB:-n8n}
+    volumes:
+      - n8n_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${N8N_POSTGRES_USER:-n8n} -d $${N8N_POSTGRES_DB:-n8n}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── n8n workflow automation ───────────────────────────────────────────────
+  n8n:
+    image: n8nio/n8n:latest
+    restart: unless-stopped
+    profiles: ["n8n"]
+    depends_on:
+      n8n_postgres:
+        condition: service_healthy
+    environment:
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: n8n_postgres
+      DB_POSTGRESDB_PORT: 5432
+      DB_POSTGRESDB_DATABASE: ${N8N_POSTGRES_DB:-n8n}
+      DB_POSTGRESDB_USER: ${N8N_POSTGRES_USER:-n8n}
+      DB_POSTGRESDB_PASSWORD: ${N8N_POSTGRES_PASSWORD:-CHANGE_ME}
+      N8N_HOST: ${N8N_HOST:-localhost}
+      N8N_PORT: 5678
+      N8N_PROTOCOL: ${N8N_PROTOCOL:-http}
+      WEBHOOK_URL: ${N8N_WEBHOOK_URL:-http://localhost:5678/}
+      GENERIC_TIMEZONE: ${TIMEZONE:-UTC}
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:-CHANGE_ME}
+      N8N_BASIC_AUTH_ACTIVE: ${N8N_BASIC_AUTH_ACTIVE:-false}
+      N8N_BASIC_AUTH_USER: ${N8N_BASIC_AUTH_USER:-}
+      N8N_BASIC_AUTH_PASSWORD: ${N8N_BASIC_AUTH_PASSWORD:-}
+    volumes:
+      - n8n_data:/home/node/.n8n
+    ports:
+      - "${N8N_PORT:-5678}:5678"
+
   # ── Caddy reverse proxy (public HTTPS) — OPTIONAL ────────────────────────
   # Only runs when the `public` profile is active (start.sh enables it when
   # DOMAIN is set in .env). Terminates TLS with an automatic Let's Encrypt
@@ -92,5 +139,7 @@ services:
 volumes:
   pgdata:
   storage:
+  n8n_pgdata:
+  n8n_data:
   caddy_data:
   caddy_config:
