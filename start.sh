@@ -67,6 +67,12 @@ if [ ! -f .env ]; then
   # Keep DATABASE_URL's password in sync with POSTGRES_PASSWORD.
   set_env DATABASE_URL "postgresql://app:${DB_PASSWORD}@postgres:5432/app"
 
+  # Generate n8n secrets.
+  N8N_DB_PASSWORD="$(gen 16)"
+  N8N_ENC_KEY="$(gen 32)"
+  set_env N8N_POSTGRES_PASSWORD "$N8N_DB_PASSWORD"
+  set_env N8N_ENCRYPTION_KEY    "$N8N_ENC_KEY"
+
   # Host port mappings (Compose has defaults, but expose them for easy editing).
   grep -q '^WEB_PORT=' .env || printf '\n# Host ports\nWEB_PORT=8080\nAPI_PORT=8000\n' >> .env
 
@@ -98,9 +104,19 @@ API_PORT="$(grep -E '^API_PORT=' .env | cut -d= -f2 || true)"; API_PORT="${API_P
 # enabling the `public` compose profile. Exported so every $DC call below —
 # up/down/destroy/logs — consistently includes the caddy service.
 DOMAIN="$(grep -E '^DOMAIN=' .env | cut -d= -f2 || true)"
+N8N_ENABLED="$(grep -E '^N8N_ENABLED=' .env | cut -d= -f2 || true)"
+
+PROFILES=""
 if [ -n "${DOMAIN:-}" ]; then
-  export COMPOSE_PROFILES=public
+  PROFILES="public"
   info "DOMAIN=${DOMAIN} — public HTTPS proxy (Caddy) enabled. Ensure ports 80/443 are free and DNS points here."
+fi
+if [ "${N8N_ENABLED:-false}" = "true" ]; then
+  PROFILES="${PROFILES:+$PROFILES,}n8n"
+  info "N8N_ENABLED=true — n8n + n8n_postgres services will start."
+fi
+if [ -n "$PROFILES" ]; then
+  export COMPOSE_PROFILES="$PROFILES"
 fi
 
 # ── Subcommands ──────────────────────────────────────────────────────────────
@@ -135,6 +151,7 @@ else
   warn "API didn't report ready within ~2 min. Check logs: $DC logs api"
 fi
 
+N8N_PORT_VAL="$(grep -E '^N8N_PORT=' .env | cut -d= -f2 || true)"; N8N_PORT_VAL="${N8N_PORT_VAL:-5678}"
 if [ -n "${DOMAIN:-}" ]; then
   cat <<EOF
 
@@ -152,6 +169,9 @@ else
   API docs:   http://localhost:${WEB_PORT}/api/docs   (via the web proxy)
 
 EOF
+fi
+if [ "${N8N_ENABLED:-false}" = "true" ]; then
+  printf '  n8n:        http://localhost:%s\n\n' "$N8N_PORT_VAL"
 fi
 
 if [ -n "$ADMIN_PASSWORD" ]; then
