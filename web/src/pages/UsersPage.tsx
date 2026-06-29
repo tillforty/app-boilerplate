@@ -14,6 +14,13 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 
 function initials(name: string, surname: string): string {
   return `${name.charAt(0)}${surname.charAt(0)}`.toUpperCase() || '?'
@@ -147,20 +154,21 @@ export default function UsersPage() {
                   <TableCell className="text-muted-foreground">{formatDate(u.created_at)}</TableCell>
                   {canManage && (
                     <TableCell className="text-right">
-                      <select
-                        className="h-9 rounded-md border border-input bg-background px-2 text-sm"
-                        value={roles.find((r) => r.name === u.role)?.id ?? ''}
-                        onChange={(e) => onAssign(u.id, e.target.value)}
+                      <Select
+                        value={roles.find((r) => r.name === u.role)?.id?.toString() ?? ''}
+                        onValueChange={(v) => onAssign(u.id, v)}
                       >
-                        <option value="" disabled>
-                          {t('users.assignRole')}
-                        </option>
-                        {roles.map((r) => (
-                          <option key={r.id} value={r.id}>
-                            {r.name}
-                          </option>
-                        ))}
-                      </select>
+                        <SelectTrigger className="w-36">
+                          <SelectValue placeholder={t('users.assignRole')} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {roles.map((r) => (
+                            <SelectItem key={r.id} value={r.id.toString()}>
+                              {r.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </TableCell>
                   )}
                 </TableRow>

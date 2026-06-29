@@ -39,6 +39,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 
 const money = (n: number) => `$${n.toLocaleString()}`
 const initials = (name: string) =>
@@ -320,16 +327,19 @@ export default function CustomersPage() {
             <div className="grid gap-2 sm:grid-cols-3">
               <div className="space-y-1.5">
                 <Label htmlFor="status">Status</Label>
-                <select
-                  id="status"
-                  className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                <Select
                   value={form.status}
-                  onChange={(e) => setForm({ ...form, status: e.target.value as CustomerStatus })}
+                  onValueChange={(v) => setForm({ ...form, status: v as CustomerStatus })}
                 >
-                  {CUSTOMER_STATUSES.map((s) => (
-                    <option key={s} value={s}>{STATUS_LABEL[s]}</option>
-                  ))}
-                </select>
+                  <SelectTrigger id="status">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {CUSTOMER_STATUSES.map((s) => (
+                      <SelectItem key={s} value={s}>{STATUS_LABEL[s]}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="mrr">MRR ($)</Label>
