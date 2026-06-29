@@ -9,6 +9,7 @@ import ComponentsPage from '@/pages/ComponentsPage'
 import UsersPage from '@/pages/UsersPage'
 import RolesPage from '@/pages/RolesPage'
 import ProfilePage from '@/pages/ProfilePage'
+import DocumentsPage from '@/pages/DocumentsPage'
 
 export default function App() {
   return (
@@ -23,6 +24,7 @@ export default function App() {
           <Route path="/" element={<DashboardPage />} />
           <Route path="/customers" element={<CustomersPage />} />
           <Route path="/components" element={<ComponentsPage />} />
+          <Route path="/documents" element={<DocumentsPage />} />
           <Route path="/profile" element={<ProfilePage />} />
           <Route path="/settings/users" element={<UsersPage />} />
           <Route path="/settings/roles" element={<RolesPage />} />

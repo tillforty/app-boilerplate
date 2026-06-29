@@ -12,6 +12,7 @@ import {
   BookOpen,
   Contact,
   Component,
+  FolderOpen,
   type LucideIcon,
 } from 'lucide-react'
 // Import the logo as a Vite asset so it gets a content-hashed URL
@@ -59,6 +60,7 @@ export const appConfig: AppConfig = {
   nav: [
     { label: 'Dashboard', href: '/', icon: LayoutDashboard },
     { label: 'Customers', href: '/customers', icon: Contact },
+    { label: 'Documents', href: '/documents', icon: FolderOpen },
     { label: 'Components', href: '/components', icon: Component },
   ],
   settingsNav: [
