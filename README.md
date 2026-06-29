@@ -3,7 +3,7 @@
 A full-stack starter shared across Tillforty apps:
 
 - **Frontend** — a [shadcn](https://ui.shadcn.com) **registry** of the Tillforty UI kit (theme, app shell, auth scaffold, API client). Consuming apps pull components in *as editable source* with the shadcn CLI and pull updates later as reviewable diffs.
-- **Backend** — a FastAPI template with **users + JWT auth**, an **encrypted secret vault** (pgcrypto), and **file storage** (binaries on disk, metadata in Postgres).
+- **Backend** — a FastAPI template with **users + JWT auth**, an **encrypted secret vault** (pgcrypto), and **file storage** (local disk or Backblaze B2, metadata in Postgres).
 - **Database** — the SQL migrations every app needs to provision the above.
 
 ---
@@ -247,8 +247,34 @@ CREATE EXTENSION IF NOT EXISTS vector;
 | --------------------- | --------------------------------------- | ----------- |
 | Login passwords       | `users.password_hash` (bcrypt)          | No (hash)   |
 | Readable secrets      | `vault_secrets.value` (pgp_sym_encrypt) | Yes, with `VAULT_KEY` |
-| Uploaded file binaries| disk under `STORAGE_DIR`                | n/a         |
+| Uploaded file binaries| local disk (`STORAGE_DIR`) or Backblaze B2 | n/a      |
 | File metadata         | `files` table                           | n/a         |
+
+### File storage
+
+File binaries can be stored locally or in Backblaze B2. The default is local disk
+(no extra config needed):
+
+```bash
+STORAGE_TYPE=local        # default — binaries saved under STORAGE_DIR
+STORAGE_DIR=/srv/storage  # bind-mount to a persistent volume
+```
+
+To use **Backblaze B2** instead, create a bucket and application key at
+https://secure.backblaze.com/app_keys.htm, then set:
+
+```bash
+STORAGE_TYPE=backblaze
+B2_KEY_ID=your-key-id
+B2_APPLICATION_KEY=your-application-key
+B2_BUCKET_NAME=your-bucket
+B2_ENDPOINT_URL=https://s3.us-west-004.backblazeb2.com  # region-specific
+```
+
+The `files` database table (provisioned by `migrations/0003_files.sql`) stores
+metadata for both backends — the `storage_path` column holds either a relative
+disk path (local) or an object key (B2). The **Documents** page in the UI
+(`/documents`) provides a full CRUD interface: list, upload, download, and delete.
 
 ---
 
@@ -270,7 +296,12 @@ cp .env.example .env        # never commit the filled-in .env
 | `JWT_EXPIRE_MINUTES` | API | Token lifetime (default `720` = 12h). |
 | `SEED_USER_*` | API | First user seeded on startup (name, surname, email, password). |
 | `VAULT_KEY` | API | Symmetric key for the encrypted vault. **Rotating makes existing `vault_secrets` undecryptable.** |
-| `STORAGE_DIR` | API | Disk path for uploaded file binaries — bind-mount to a persistent volume. |
+| `STORAGE_TYPE` | API | `local` (default) or `backblaze`. Controls where uploaded file binaries are stored. |
+| `STORAGE_DIR` | API | Disk path for uploaded file binaries — bind-mount to a persistent volume. Only used when `STORAGE_TYPE=local`. |
+| `B2_KEY_ID` | API | Backblaze B2 application key ID. Required when `STORAGE_TYPE=backblaze`. |
+| `B2_APPLICATION_KEY` | API | Backblaze B2 application key. Required when `STORAGE_TYPE=backblaze`. |
+| `B2_BUCKET_NAME` | API | Backblaze B2 bucket name. Required when `STORAGE_TYPE=backblaze`. |
+| `B2_ENDPOINT_URL` | API | Backblaze B2 S3-compatible endpoint, e.g. `https://s3.us-west-004.backblazeb2.com`. Required when `STORAGE_TYPE=backblaze`. |
 | `EMBEDDING_MODEL` | API | Model that turns text into vectors for the pgvector store. |
 | `EMBEDDING_DIM` | API | Vector dimension — **must match** the embedding model (`text-embedding-3-small` = 1536). |
 | `EMBEDDING_API_KEY` | API | Key for the embedding provider. |
