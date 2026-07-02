@@ -13,33 +13,42 @@ A full-stack starter shared across Tillforty apps:
 On a **fresh Ubuntu server**, install [Claude Code](https://claude.com/claude-code),
 run `claude`, and paste the prompt below. Edit the two values on the first line
 (your domain + email); everything else runs unattended — Claude installs Docker,
-clones this repo, generates all secrets, and brings the stack up live over HTTPS
-without asking any follow-up questions.
+clones this repo, generates all secrets, brings **React + Postgres + the API +
+n8n** up in Docker, and provisions a **Let's Encrypt** TLS certificate so the app
+is live over HTTPS — without asking any follow-up questions.
 
 ```text
 Deploy the Tillforty app-boilerplate on this fresh Ubuntu server. Use
-DOMAIN=<DOMAIN> and ACME_EMAIL=<ACME_EMAIL>.
+DOMAIN=<DOMAIN> and ACME_EMAIL=<ACME_EMAIL>. I want the FULL stack up:
+React frontend + Postgres + the FastAPI backend + n8n, in Docker, live over
+HTTPS with a Let's Encrypt certificate.
 
 Do this end to end with NO clarifying questions — make sensible defaults for
 anything unspecified and just proceed:
 
 1. Confirm DNS for the domain already points at this box and that ports 80/443
-   are open; if not, note it and continue anyway.
-2. Run the one-command deploy as root/sudo:
+   are open (Let's Encrypt cert issuance needs both); if not, note it and
+   continue anyway.
+2. Run the one-command deploy as root/sudo (N8N_ENABLED=true turns on n8n):
      curl -fsSL https://raw.githubusercontent.com/tillforty/app-boilerplate/main/deploy.sh \
-       | DOMAIN=<DOMAIN> ACME_EMAIL=<ACME_EMAIL> bash
+       | DOMAIN=<DOMAIN> ACME_EMAIL=<ACME_EMAIL> N8N_ENABLED=true bash
    This installs Docker if missing, clones to /opt/app-boilerplate, writes .env
-   with auto-generated DB password / JWT_SECRET / VAULT_KEY / seed admin password,
-   and starts Postgres → migrations → API → web behind a Caddy reverse proxy that
-   auto-provisions a Let's Encrypt cert.
-3. Wait for the API /ready check to pass, then verify https://<domain> serves the
-   app and https://<domain>/api/docs loads.
-4. Report back: the live URL, the admin email + generated password (printed once
-   during deploy), and any secrets I need to save.
+   with auto-generated DB password / JWT_SECRET / VAULT_KEY / seed admin password
+   (plus the n8n DB password + encryption key), and starts
+   Postgres → migrations → API → web + n8n behind a Caddy reverse proxy.
+3. Caddy must obtain and install a Let's Encrypt TLS certificate for the domain
+   during this run — confirm it did (check `docker compose logs caddy` for a
+   successful certificate obtain; retry once if it's still pending).
+4. Wait for the API /ready check to pass, then verify https://<domain> serves the
+   app and https://<domain>/api/docs loads over valid HTTPS. n8n listens on
+   http://<server-ip>:5678.
+5. Report back: the live HTTPS URL, confirmation the Let's Encrypt cert issued,
+   the admin email + generated password (printed once during deploy), the n8n URL,
+   and any secrets I need to save.
 
 Leave the LLM keys (EMBEDDING_API_KEY, OPERATING_AGENT_API_KEY) as CHANGE_ME —
-the app runs without them. Don't enable n8n unless I ask. Re-running deploy.sh
-later is idempotent (git pull + rebuild, data preserved).
+the app runs without them. Re-running deploy.sh later is idempotent (git pull +
+rebuild, data preserved).
 ```
 
 Prefer the interactive path instead? Skip the prompt and run the

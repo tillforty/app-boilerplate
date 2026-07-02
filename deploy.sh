@@ -25,6 +25,9 @@
 #   DOMAIN                  public hostname; omit for a local-only (no-TLS) run
 #   ACME_EMAIL              Let's Encrypt contact email (recommended)
 #   OAUTH_REDIRECT_BASE_URL defaults to https://$DOMAIN when DOMAIN is set
+#   N8N_ENABLED             set to "true" to bring up n8n (on host port N8N_PORT)
+#   N8N_PORT                n8n host port (default: 5678)
+#   TIMEZONE                n8n schedule-trigger timezone (default: UTC)
 #   GIT_URL                 repo to deploy (default: this repo on GitHub)
 #   BRANCH                  branch to deploy (default: main)
 #   APP_DIR                 checkout location (default: /opt/app-boilerplate)
@@ -92,6 +95,9 @@ export DOMAIN="${DOMAIN:-}"
 export ACME_EMAIL="${ACME_EMAIL:-}"
 export OAUTH_REDIRECT_BASE_URL="${OAUTH_REDIRECT_BASE_URL:-}"
 export CADDY_TLS="${CADDY_TLS:-}"
+export N8N_ENABLED="${N8N_ENABLED:-}"
+export N8N_PORT="${N8N_PORT:-}"
+export TIMEZONE="${TIMEZONE:-}"
 
 [ -n "$DOMAIN" ] || warn "DOMAIN not set — deploying local-only (HTTP on :8080, no TLS)."
 
@@ -99,7 +105,7 @@ info "Handing off to start.sh…"
 cd "$APP_DIR"
 if [ -n "$SUDO" ]; then
   # Run the stack as root (Docker), forwarding the deploy vars through sudo.
-  exec sudo --preserve-env=DOMAIN,ACME_EMAIL,OAUTH_REDIRECT_BASE_URL,CADDY_TLS ./start.sh
+  exec sudo --preserve-env=DOMAIN,ACME_EMAIL,OAUTH_REDIRECT_BASE_URL,CADDY_TLS,N8N_ENABLED,N8N_PORT,TIMEZONE ./start.sh
 else
   exec ./start.sh
 fi

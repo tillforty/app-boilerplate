@@ -89,6 +89,11 @@ if [ ! -f .env ]; then
     set_env OAUTH_REDIRECT_BASE_URL "https://${DOMAIN}"
   fi
 
+  # n8n deploy-time overrides (unattended installs pass these via deploy.sh).
+  [ -n "${N8N_ENABLED:-}" ] && { set_env N8N_ENABLED "$N8N_ENABLED"; info "N8N_ENABLED set from environment: $N8N_ENABLED"; }
+  [ -n "${N8N_PORT:-}" ]    && set_env N8N_PORT "$N8N_PORT"
+  [ -n "${TIMEZONE:-}" ]    && set_env TIMEZONE "$TIMEZONE"
+
   ok ".env created. DB/JWT/Vault secrets generated."
   warn "LLM keys (EMBEDDING_API_KEY / OPERATING_AGENT_API_KEY) are left as CHANGE_ME."
   warn "The app runs fine without them; fill them in .env to enable embeddings/LLM."
