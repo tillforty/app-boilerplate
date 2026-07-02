@@ -569,3 +569,13 @@ git tag v1.0.0               # tag releases so apps can pin
 
 Host the `r/` directory anywhere static (GitHub raw, GitHub Pages, or Vercel) and
 make sure `components.json` in each app points at it.
+
+### Optional dev tooling
+
+**Not required to run or deploy** the stack — this is only for contributors who
+use [Graphite](https://graphite.dev) for stacked branches/PRs. Install the CLI
+once on your own machine:
+
+```bash
+npm install -g @withgraphite/graphite-cli   # provides the `gt` command
+```
