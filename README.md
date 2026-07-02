@@ -534,7 +534,7 @@ without asking any follow-up questions.
 
 ```text
 Deploy the Tillforty app-boilerplate on this fresh Ubuntu server. Use
-DOMAIN=app.example.com and ACME_EMAIL=ops@example.com.
+DOMAIN=<DOMAIN> and ACME_EMAIL=<ACME_EMAIL>.
 
 Do this end to end with NO clarifying questions — make sensible defaults for
 anything unspecified and just proceed:
@@ -543,7 +543,7 @@ anything unspecified and just proceed:
    are open; if not, note it and continue anyway.
 2. Run the one-command deploy as root/sudo:
      curl -fsSL https://raw.githubusercontent.com/tillforty/app-boilerplate/main/deploy.sh \
-       | DOMAIN=app.example.com ACME_EMAIL=ops@example.com bash
+       | DOMAIN=<DOMAIN> ACME_EMAIL=<ACME_EMAIL> bash
    This installs Docker if missing, clones to /opt/app-boilerplate, writes .env
    with auto-generated DB password / JWT_SECRET / VAULT_KEY / seed admin password,
    and starts Postgres → migrations → API → web behind a Caddy reverse proxy that
