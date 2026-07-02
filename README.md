@@ -54,6 +54,49 @@ rebuild, data preserved).
 Prefer the interactive path instead? Skip the prompt and run the
 [setup wizard](#full-ubuntu-setup-interactive-wizard) or read **[DEPLOY.md](DEPLOY.md)**.
 
+### …or one prompt for a full work / develop / commit / deploy box
+
+The prompt above only *deploys*. If you also want to **develop and commit** on the
+same Ubuntu box, paste this instead — it installs the whole toolchain (git, GitHub
+CLI, Node, Docker, Graphite, Claude Code), deploys the live HTTPS stack, and preps
+the frontend for local dev. Two steps need a token you paste once (GitHub +
+Graphite login); everything else is unattended.
+
+```text
+Set up this fresh Ubuntu server as a complete work/develop/commit/deploy box for
+the Tillforty app-boilerplate, then deploy it live. Use DOMAIN=<DOMAIN> and
+ACME_EMAIL=<ACME_EMAIL>. Run end to end with sensible defaults — only stop when a
+step genuinely needs a secret/token from me (the GitHub + Graphite logins).
+
+1. Install the toolchain, then print each version to confirm:
+   - git and the GitHub CLI (gh)
+   - Node.js 20 LTS + npm (via NodeSource):
+       curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - && sudo apt-get install -y nodejs
+   - Graphite CLI:  npm install -g @withgraphite/graphite-cli   (provides `gt`)
+   - Claude Code:   npm install -g @anthropic-ai/claude-code
+   (Docker + Compose is installed by deploy.sh in step 3 — skip if already present.)
+2. Set up commit access — these need a token/browser, so pause and let me finish them:
+       gh auth login     # GitHub: clone / push / PRs
+       gt auth           # Graphite: stacked PRs (paste token from graphite.dev)
+3. Clone + deploy the full stack live over HTTPS. This installs Docker if missing,
+   generates all secrets, brings up React + Postgres + the API + n8n behind Caddy,
+   and provisions a Let's Encrypt TLS certificate for the domain during the run:
+       curl -fsSL https://raw.githubusercontent.com/tillforty/app-boilerplate/main/deploy.sh \
+         | DOMAIN=<DOMAIN> ACME_EMAIL=<ACME_EMAIL> N8N_ENABLED=true bash
+   Confirm Caddy obtained the Let's Encrypt cert (docker compose logs caddy).
+4. Prep the frontend for local development:
+       cd /opt/app-boilerplate/web && npm ci
+   Now `npm run dev` (Vite) runs the SPA, and `npx shadcn@latest build` rebuilds
+   the registry from registry/*.
+5. Report back: installed tool versions, the live HTTPS URL + cert confirmation,
+   the admin email + generated password (printed once during deploy), the n8n URL
+   (http://<server-ip>:5678), and anything else I need to save.
+
+Leave EMBEDDING_API_KEY / OPERATING_AGENT_API_KEY as CHANGE_ME — the app runs
+without them. Re-running deploy.sh later is idempotent (git pull + rebuild, data
+preserved).
+```
+
 ---
 
 ## 🚀 Run the whole stack with one command
