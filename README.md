@@ -8,6 +8,45 @@ A full-stack starter shared across Tillforty apps:
 
 ---
 
+## 🤖 Launch the whole stack with Claude (zero-question prompt)
+
+On a **fresh Ubuntu server**, install [Claude Code](https://claude.com/claude-code),
+run `claude`, and paste the prompt below. Edit the two values on the first line
+(your domain + email); everything else runs unattended — Claude installs Docker,
+clones this repo, generates all secrets, and brings the stack up live over HTTPS
+without asking any follow-up questions.
+
+```text
+Deploy the Tillforty app-boilerplate on this fresh Ubuntu server. Use
+DOMAIN=<DOMAIN> and ACME_EMAIL=<ACME_EMAIL>.
+
+Do this end to end with NO clarifying questions — make sensible defaults for
+anything unspecified and just proceed:
+
+1. Confirm DNS for the domain already points at this box and that ports 80/443
+   are open; if not, note it and continue anyway.
+2. Run the one-command deploy as root/sudo:
+     curl -fsSL https://raw.githubusercontent.com/tillforty/app-boilerplate/main/deploy.sh \
+       | DOMAIN=<DOMAIN> ACME_EMAIL=<ACME_EMAIL> bash
+   This installs Docker if missing, clones to /opt/app-boilerplate, writes .env
+   with auto-generated DB password / JWT_SECRET / VAULT_KEY / seed admin password,
+   and starts Postgres → migrations → API → web behind a Caddy reverse proxy that
+   auto-provisions a Let's Encrypt cert.
+3. Wait for the API /ready check to pass, then verify https://<domain> serves the
+   app and https://<domain>/api/docs loads.
+4. Report back: the live URL, the admin email + generated password (printed once
+   during deploy), and any secrets I need to save.
+
+Leave the LLM keys (EMBEDDING_API_KEY, OPERATING_AGENT_API_KEY) as CHANGE_ME —
+the app runs without them. Don't enable n8n unless I ask. Re-running deploy.sh
+later is idempotent (git pull + rebuild, data preserved).
+```
+
+Prefer the interactive path instead? Skip the prompt and run the
+[setup wizard](#full-ubuntu-setup-interactive-wizard) or read **[DEPLOY.md](DEPLOY.md)**.
+
+---
+
 ## 🚀 Run the whole stack with one command
 
 A Dockerized, self-contained runtime is included so the entire boilerplate —
@@ -521,42 +560,3 @@ git tag v1.0.0               # tag releases so apps can pin
 
 Host the `r/` directory anywhere static (GitHub raw, GitHub Pages, or Vercel) and
 make sure `components.json` in each app points at it.
-
----
-
-## 🤖 Launch the whole stack with Claude (zero-question prompt)
-
-On a **fresh Ubuntu server**, install [Claude Code](https://claude.com/claude-code),
-run `claude`, and paste the prompt below. Edit the two values on the first line
-(your domain + email); everything else runs unattended — Claude installs Docker,
-clones this repo, generates all secrets, and brings the stack up live over HTTPS
-without asking any follow-up questions.
-
-```text
-Deploy the Tillforty app-boilerplate on this fresh Ubuntu server. Use
-DOMAIN=<DOMAIN> and ACME_EMAIL=<ACME_EMAIL>.
-
-Do this end to end with NO clarifying questions — make sensible defaults for
-anything unspecified and just proceed:
-
-1. Confirm DNS for the domain already points at this box and that ports 80/443
-   are open; if not, note it and continue anyway.
-2. Run the one-command deploy as root/sudo:
-     curl -fsSL https://raw.githubusercontent.com/tillforty/app-boilerplate/main/deploy.sh \
-       | DOMAIN=<DOMAIN> ACME_EMAIL=<ACME_EMAIL> bash
-   This installs Docker if missing, clones to /opt/app-boilerplate, writes .env
-   with auto-generated DB password / JWT_SECRET / VAULT_KEY / seed admin password,
-   and starts Postgres → migrations → API → web behind a Caddy reverse proxy that
-   auto-provisions a Let's Encrypt cert.
-3. Wait for the API /ready check to pass, then verify https://<domain> serves the
-   app and https://<domain>/api/docs loads.
-4. Report back: the live URL, the admin email + generated password (printed once
-   during deploy), and any secrets I need to save.
-
-Leave the LLM keys (EMBEDDING_API_KEY, OPERATING_AGENT_API_KEY) as CHANGE_ME —
-the app runs without them. Don't enable n8n unless I ask. Re-running deploy.sh
-later is idempotent (git pull + rebuild, data preserved).
-```
-
-Prefer the interactive path instead? Skip the prompt and run the
-[setup wizard](#full-ubuntu-setup-interactive-wizard) or read **[DEPLOY.md](DEPLOY.md)**.
