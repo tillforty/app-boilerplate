@@ -9,7 +9,7 @@ import os
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
-from . import db, demo, files, oauth, roles, vault, vectors
+from . import ai, customers, db, demo, files, oauth, roles, stats, vault, vectors
 from .auth import ensure_schema_and_seed, router as auth_router
 
 DATABASE_URL = os.environ["DATABASE_URL"]
@@ -28,6 +28,8 @@ async def startup() -> None:
     await vault.ensure_schema()
     await files.ensure_schema()
     await vectors.ensure_schema()
+    # customers must run after vectors: it declares a pgvector embedding column.
+    await customers.ensure_schema()
 
 
 @app.on_event("shutdown")
@@ -41,6 +43,9 @@ app.include_router(oauth.router)
 app.include_router(roles.router)
 app.include_router(vault.router)
 app.include_router(files.router)
+app.include_router(stats.router)
+app.include_router(ai.router)
+app.include_router(customers.router)
 # Register your app-specific routers here.
 
 

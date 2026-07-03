@@ -32,6 +32,8 @@ PERMISSION_CATALOG: list[dict] = [
     {"resource": "roles", "label": "Roles", "actions": ["read", "manage"]},
     {"resource": "files", "label": "Files", "actions": ["read", "upload", "delete"]},
     {"resource": "vault", "label": "Vault", "actions": ["read", "write"]},
+    {"resource": "customers", "label": "Customers", "actions": ["read", "create", "update", "delete"]},
+    {"resource": "ai", "label": "AI", "actions": ["use"]},
 ]
 
 ALL_PERMISSIONS = {f"{g['resource']}:{a}" for g in PERMISSION_CATALOG for a in g["actions"]}
@@ -72,7 +74,7 @@ async def ensure_schema_and_seed() -> None:
             ON CONFLICT (name) DO UPDATE SET is_system = true
             """,
             MEMBER_ROLE,
-            ["users:read", "files:read", "files:upload"],
+            ["users:read", "files:read", "files:upload", "customers:read"],
         )
         # Backfill any user without a role to administrator (covers the seed user).
         await conn.execute(

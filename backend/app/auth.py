@@ -7,6 +7,7 @@ The canonical DDL also lives in migrations/0002_users.sql.
 import os
 from datetime import datetime
 
+import asyncpg
 import jwt
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -108,6 +109,20 @@ async def get_current_user(
     return UserOut(**dict(row))
 
 
+async def require_users_read(current: "UserOut" = Depends(get_current_user)) -> "UserOut":
+    """Guard the users listing behind the 'users:read' permission.
+
+    Imported lazily to avoid a circular import (roles imports auth at module
+    load); the check itself reuses the roles permission helpers.
+    """
+    from .roles import WILDCARD, get_user_permissions
+
+    perms = await get_user_permissions(current.id)
+    if WILDCARD in perms or "users:read" in perms:
+        return current
+    raise HTTPException(status.HTTP_403_FORBIDDEN, "Missing permission: users:read")
+
+
 def _set_auth_cookie(response: Response, token: str) -> None:
     """Set the access_token cookie (used to authorise browser access to /docs)."""
     response.set_cookie(
@@ -153,11 +168,15 @@ async def update_me(body: ProfileUpdate, current: UserOut = Depends(get_current_
     if not fields:
         return current
     sets = ", ".join(f"{k} = ${i + 2}" for i, k in enumerate(fields))
-    row = await db.get_pool().fetchrow(
-        f"UPDATE users SET {sets} WHERE id = $1 RETURNING id, name, surname, email",
-        current.id,
-        *fields.values(),
-    )
+    try:
+        row = await db.get_pool().fetchrow(
+            f"UPDATE users SET {sets} WHERE id = $1 RETURNING id, name, surname, email",
+            current.id,
+            *fields.values(),
+        )
+    except asyncpg.UniqueViolationError:
+        # email has a UNIQUE constraint — surface a clean 409 instead of a 500.
+        raise HTTPException(status.HTTP_409_CONFLICT, "That email is already in use")
     return UserOut(**dict(row))
 
 
@@ -178,7 +197,7 @@ async def change_password(
 
 
 @router.get("/users", response_model=list[UserListItem])
-async def list_users(_: UserOut = Depends(get_current_user)) -> list[UserListItem]:
+async def list_users(_: UserOut = Depends(require_users_read)) -> list[UserListItem]:
     rows = await db.get_pool().fetch(
         """
         SELECT u.id, u.name, u.surname, u.email, u.created_at, r.name AS role

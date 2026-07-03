@@ -4,7 +4,9 @@ import {
   Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, XAxis, YAxis,
 } from 'recharts'
 import { useAuth } from '@/context/AuthContext'
+import { getStats, type Stats } from '@/lib/stats'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -34,11 +36,25 @@ interface DashboardChart {
 interface Dashboard {
   id: string
   label: string
+  /** When true, KPI cards are replaced with live figures from GET /stats. */
+  live?: boolean
   kpis: Kpi[]
   charts: DashboardChart[]
 }
 
-// ── Mock data ─────────────────────────────────────────────────────────────────
+const money = (n: number) => `$${n.toLocaleString()}`
+
+/** Build the Overview KPI cards from real database counts. */
+function overviewKpis(stats: Stats): Kpi[] {
+  return [
+    { label: 'Users',      value: stats.users.toLocaleString(),     hint: 'registered accounts',                    trend: 'neutral' },
+    { label: 'Customers',  value: stats.customers.toLocaleString(),  hint: `${stats.active_customers} active`,       trend: 'neutral' },
+    { label: 'Active MRR', value: money(stats.mrr),                  hint: 'from active customers',                  trend: 'up'      },
+    { label: 'Files',      value: stats.files.toLocaleString(),      hint: 'stored via the files API',               trend: 'neutral' },
+  ]
+}
+
+// ── Sample data (charts + non-Overview tabs are illustrative) ───────────────────
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul']
 
@@ -46,12 +62,8 @@ const DASHBOARDS: Dashboard[] = [
   {
     id: 'overview',
     label: 'Overview',
-    kpis: [
-      { label: 'Active users',   value: '1,248',  hint: '+12% this week',       trend: 'up'      },
-      { label: 'Requests today', value: '38.4k',  hint: 'across all endpoints', trend: 'up'      },
-      { label: 'Storage used',   value: '6.2 GB', hint: 'of 50 GB allocated',   trend: 'neutral' },
-      { label: 'Uptime',         value: '99.98%', hint: 'last 30 days',         trend: 'up'      },
-    ],
+    live: true,
+    kpis: [], // replaced at runtime by overviewKpis(stats)
     charts: [
       {
         title: 'Active users over time',
@@ -247,6 +259,7 @@ export default function DashboardPage() {
   const { user } = useAuth()
   const [activeDashboard, setActiveDashboard] = useState(DASHBOARDS[0].id)
   const [loading, setLoading] = useState(true)
+  const [stats, setStats] = useState<Stats | null>(null)
 
   useEffect(() => {
     setLoading(true)
@@ -254,7 +267,21 @@ export default function DashboardPage() {
     return () => clearTimeout(t)
   }, [activeDashboard])
 
+  // Real figures for the Overview cards.
+  useEffect(() => {
+    let active = true
+    getStats()
+      .then((s) => active && setStats(s))
+      .catch(() => active && setStats(null))
+    return () => {
+      active = false
+    }
+  }, [])
+
   const dashboard = DASHBOARDS.find((d) => d.id === activeDashboard) ?? DASHBOARDS[0]
+  // Overview shows live data; other tabs use their sample KPIs.
+  const kpis = dashboard.live ? (stats ? overviewKpis(stats) : []) : dashboard.kpis
+  const kpisLoading = dashboard.live ? stats === null : loading
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
@@ -282,7 +309,7 @@ export default function DashboardPage() {
 
       {/* KPI cards */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {loading
+        {kpisLoading
           ? Array.from({ length: 4 }).map((_, i) => (
               <Card key={i}>
                 <CardHeader className="pb-2"><Skeleton className="h-4 w-24" /></CardHeader>
@@ -292,7 +319,7 @@ export default function DashboardPage() {
                 </CardContent>
               </Card>
             ))
-          : dashboard.kpis.map((kpi) => (
+          : kpis.map((kpi) => (
               <Card key={kpi.label}>
                 <CardHeader className="pb-2">
                   <CardDescription>{kpi.label}</CardDescription>
@@ -309,6 +336,10 @@ export default function DashboardPage() {
       </div>
 
       {/* Charts */}
+      <div className="flex items-center gap-2">
+        <h2 className="text-sm font-medium text-muted-foreground">Trends</h2>
+        <Badge variant="secondary" className="text-[10px]">Sample data</Badge>
+      </div>
       <div className="grid gap-4 lg:grid-cols-2">
         {loading
           ? Array.from({ length: 2 }).map((_, i) => (

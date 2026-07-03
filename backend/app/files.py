@@ -19,10 +19,13 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 from . import db
-from .auth import UserOut, get_current_user
+from .auth import UserOut
+from .roles import require_permission
 
 STORAGE_TYPE = os.environ.get("STORAGE_TYPE", "local").lower()
 STORAGE_DIR = Path(os.environ.get("STORAGE_DIR", "/srv/storage"))
+# Reject uploads larger than this (bytes). Default 25 MiB; 0 disables the limit.
+MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", str(25 * 1024 * 1024)))
 
 router = APIRouter(prefix="/files", tags=["files"])
 
@@ -187,15 +190,20 @@ async def delete_file(file_id: int) -> bool:
 async def upload_file(
     file: UploadFile,
     type: FileType = Form(FileType.other),
-    _: UserOut = Depends(get_current_user),
+    _: UserOut = Depends(require_permission("files:upload")),
 ) -> FileOut:
     data = await file.read()
+    if MAX_UPLOAD_BYTES and len(data) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            f"File exceeds the {MAX_UPLOAD_BYTES}-byte upload limit",
+        )
     row = await save_upload(file.filename or "unnamed", data, type)
     return FileOut(**row)
 
 
 @router.get("", response_model=list[FileOut])
-async def list_files(_: UserOut = Depends(get_current_user)) -> list[FileOut]:
+async def list_files(_: UserOut = Depends(require_permission("files:read"))) -> list[FileOut]:
     rows = await db.get_pool().fetch(
         "SELECT id, name, type, storage_path, created_at FROM files ORDER BY id DESC"
     )
@@ -203,7 +211,7 @@ async def list_files(_: UserOut = Depends(get_current_user)) -> list[FileOut]:
 
 
 @router.get("/{file_id}/content")
-async def download_file(file_id: int, _: UserOut = Depends(get_current_user)):
+async def download_file(file_id: int, _: UserOut = Depends(require_permission("files:read"))):
     row = await db.get_pool().fetchrow(
         "SELECT name, storage_path FROM files WHERE id = $1", file_id
     )
@@ -225,6 +233,8 @@ async def download_file(file_id: int, _: UserOut = Depends(get_current_user)):
 
 
 @router.delete("/{file_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_file_endpoint(file_id: int, _: UserOut = Depends(get_current_user)) -> None:
+async def delete_file_endpoint(
+    file_id: int, _: UserOut = Depends(require_permission("files:delete"))
+) -> None:
     if not await delete_file(file_id):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "File not found")

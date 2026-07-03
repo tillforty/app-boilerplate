@@ -2,10 +2,39 @@
  * English translations (the default + reference language).
  *
  * To add a language: copy this file (e.g. `lt.ts`), translate the values, keep
- * the SAME keys, and register it in `index.tsx`. Keys are accessed by dot path,
- * e.g. t('roles.title'). Use {placeholders} for interpolation, e.g. t('roles.editRole', { name }).
+ * the SAME keys, type it as `Dictionary`, and register it in `index.tsx`. Keys
+ * are accessed by dot path, e.g. t('roles.title'). Use {placeholders} for
+ * interpolation, e.g. t('roles.editRole', { name }).
+ *
+ * `satisfies Dictionary` keeps English as the canonical shape while widening
+ * value types to `string`, so translated dictionaries type-check against it.
  */
-export const en = {
+export interface Dictionary {
+  common: Record<
+    'save' | 'saving' | 'cancel' | 'delete' | 'edit' | 'create' | 'loading' | 'search' | 'confirm' | 'actions' | 'none',
+    string
+  >
+  nav: Record<
+    'dashboard' | 'users' | 'roles' | 'settings' | 'navigation' | 'profile' | 'apiDocs' | 'signOut',
+    string
+  >
+  auth: Record<
+    | 'title' | 'email' | 'password' | 'signIn' | 'signingIn' | 'invalidCredentials'
+    | 'continueWith' | 'signInWith' | 'completing' | 'missingToken' | 'callbackFailed'
+    | 'demoTitle' | 'demoUsername' | 'demoPassword' | 'demoUse',
+    string
+  >
+  roles: Record<
+    | 'title' | 'subtitle' | 'newRole' | 'editRole' | 'system' | 'fullAccess' | 'noPermissions'
+    | 'permissions' | 'name' | 'description' | 'namePlaceholder' | 'descPlaceholder' | 'dialogHint'
+    | 'adminLocked' | 'deleteConfirm' | 'loadFailed' | 'saveFailed' | 'deleteFailed',
+    string
+  >
+  users: Record<'colUser' | 'colEmail' | 'colRole' | 'colJoined' | 'colActions' | 'assignRole' | 'empty', string>
+  language: Record<'label', string>
+}
+
+export const en: Dictionary = {
   common: {
     save: 'Save',
     saving: 'Saving…',
@@ -79,6 +108,4 @@ export const en = {
   language: {
     label: 'Language',
   },
-} as const
-
-export type Dictionary = typeof en
+}

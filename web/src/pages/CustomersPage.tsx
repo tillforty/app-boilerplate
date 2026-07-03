@@ -1,13 +1,19 @@
 import { useEffect, useMemo, useState } from 'react'
 import { MoreHorizontal, Plus, Search, Pencil, Trash2 } from 'lucide-react'
 import {
-  DEMO_CUSTOMERS,
+  listCustomers,
+  createCustomer,
+  updateCustomer,
+  deleteCustomer,
   CUSTOMER_STATUSES,
   STATUS_LABEL,
   STATUS_VARIANT,
   type Customer,
+  type CustomerInput,
   type CustomerStatus,
-} from '@/lib/demo-data'
+} from '@/lib/customers'
+import { ApiError } from '@/lib/api'
+import { PermissionGate } from '@/components/PermissionGate'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -50,7 +56,7 @@ import {
 const money = (n: number) => `$${n.toLocaleString()}`
 const initials = (name: string) =>
   name.split(' ').map((p) => p[0]).slice(0, 2).join('').toUpperCase() || '?'
-const blankForm = (): Omit<Customer, 'id' | 'joined'> => ({
+const blankForm = (): CustomerInput => ({
   name: '',
   company: '',
   email: '',
@@ -61,20 +67,33 @@ const blankForm = (): Omit<Customer, 'id' | 'joined'> => ({
 
 export default function CustomersPage() {
   const [rows, setRows] = useState<Customer[] | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const [tab, setTab] = useState<'all' | CustomerStatus>('all')
 
   // edit/create dialog
   const [editorOpen, setEditorOpen] = useState(false)
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [form, setForm] = useState(blankForm())
+  const [editingId, setEditingId] = useState<number | null>(null)
+  const [form, setForm] = useState<CustomerInput>(blankForm())
+  const [saving, setSaving] = useState(false)
+  const [formError, setFormError] = useState<string | null>(null)
 
   // delete confirm
   const [deleteTarget, setDeleteTarget] = useState<Customer | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   useEffect(() => {
-    const t = setTimeout(() => setRows(DEMO_CUSTOMERS), 700)
-    return () => clearTimeout(t)
+    let active = true
+    listCustomers()
+      .then((data) => active && setRows(data))
+      .catch((e) => {
+        if (!active) return
+        setLoadError(e instanceof ApiError ? e.message : 'Failed to load customers')
+        setRows([])
+      })
+    return () => {
+      active = false
+    }
   }, [])
 
   const filtered = useMemo(() => {
@@ -104,39 +123,56 @@ export default function CustomersPage() {
   function openCreate() {
     setEditingId(null)
     setForm(blankForm())
+    setFormError(null)
     setEditorOpen(true)
   }
 
   function openEdit(c: Customer) {
     setEditingId(c.id)
-    const { id: _id, joined: _joined, ...rest } = c
-    void _id
-    void _joined
-    setForm(rest)
+    setForm({
+      name: c.name,
+      company: c.company,
+      email: c.email,
+      status: c.status,
+      mrr: c.mrr,
+      seats: c.seats,
+    })
+    setFormError(null)
     setEditorOpen(true)
   }
 
-  function save() {
+  async function save() {
     if (!form.name.trim() || !form.email.trim()) return
-    setRows((prev) => {
-      const list = prev ?? []
-      if (editingId) {
-        return list.map((c) => (c.id === editingId ? { ...c, ...form } : c))
+    setSaving(true)
+    setFormError(null)
+    try {
+      if (editingId !== null) {
+        const updated = await updateCustomer(editingId, form)
+        setRows((prev) => (prev ?? []).map((c) => (c.id === editingId ? updated : c)))
+      } else {
+        const created = await createCustomer(form)
+        setRows((prev) => [created, ...(prev ?? [])])
       }
-      const created: Customer = {
-        ...form,
-        id: `c-${Date.now()}`,
-        joined: new Date().toISOString().slice(0, 10),
-      }
-      return [created, ...list]
-    })
-    setEditorOpen(false)
+      setEditorOpen(false)
+    } catch (e) {
+      setFormError(e instanceof ApiError ? e.message : 'Failed to save customer')
+    } finally {
+      setSaving(false)
+    }
   }
 
-  function confirmDelete() {
+  async function confirmDelete() {
     if (!deleteTarget) return
-    setRows((prev) => (prev ?? []).filter((c) => c.id !== deleteTarget.id))
-    setDeleteTarget(null)
+    setDeleting(true)
+    try {
+      await deleteCustomer(deleteTarget.id)
+      setRows((prev) => (prev ?? []).filter((c) => c.id !== deleteTarget.id))
+      setDeleteTarget(null)
+    } catch (e) {
+      setFormError(e instanceof ApiError ? e.message : 'Failed to delete customer')
+    } finally {
+      setDeleting(false)
+    }
   }
 
   const loading = rows === null
@@ -147,14 +183,23 @@ export default function CustomersPage() {
         <div>
           <h1 className="text-2xl font-semibold">Customers</h1>
           <p className="text-sm text-muted-foreground">
-            A CRM-style example: table, search, filters, tabs, and full CRUD on dummy data.
+            A CRM-style example backed by the real <code>/customers</code> API — table, search,
+            filters, tabs and full CRUD with role-based access.
           </p>
         </div>
-        <Button onClick={openCreate} className="w-full sm:w-auto">
-          <Plus className="mr-2 h-4 w-4" />
-          Add customer
-        </Button>
+        <PermissionGate permission="customers:create">
+          <Button onClick={openCreate} className="w-full sm:w-auto">
+            <Plus className="mr-2 h-4 w-4" />
+            Add customer
+          </Button>
+        </PermissionGate>
       </div>
+
+      {loadError && (
+        <div className="rounded-md border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          {loadError}
+        </div>
+      )}
 
       {/* Summary stats */}
       <div className="grid gap-4 sm:grid-cols-3">
@@ -241,7 +286,9 @@ export default function CustomersPage() {
             ) : filtered.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">
-                  No customers match your filters.
+                  {(rows?.length ?? 0) === 0
+                    ? 'No customers yet. Add your first one.'
+                    : 'No customers match your filters.'}
                 </TableCell>
               </TableRow>
             ) : (
@@ -273,18 +320,30 @@ export default function CustomersPage() {
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => openEdit(c)}>
-                          <Pencil className="mr-2 h-4 w-4" />
-                          Edit
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem
-                          className="text-destructive focus:text-destructive"
-                          onClick={() => setDeleteTarget(c)}
+                        <PermissionGate
+                          permission="customers:update"
+                          fallback={
+                            <DropdownMenuItem disabled>
+                              <Pencil className="mr-2 h-4 w-4" />
+                              Edit
+                            </DropdownMenuItem>
+                          }
                         >
-                          <Trash2 className="mr-2 h-4 w-4" />
-                          Delete
-                        </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => openEdit(c)}>
+                            <Pencil className="mr-2 h-4 w-4" />
+                            Edit
+                          </DropdownMenuItem>
+                        </PermissionGate>
+                        <PermissionGate permission="customers:delete">
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            className="text-destructive focus:text-destructive"
+                            onClick={() => setDeleteTarget(c)}
+                          >
+                            <Trash2 className="mr-2 h-4 w-4" />
+                            Delete
+                          </DropdownMenuItem>
+                        </PermissionGate>
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </TableCell>
@@ -304,9 +363,9 @@ export default function CustomersPage() {
       <Dialog open={editorOpen} onOpenChange={setEditorOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{editingId ? 'Edit customer' : 'Add customer'}</DialogTitle>
+            <DialogTitle>{editingId !== null ? 'Edit customer' : 'Add customer'}</DialogTitle>
             <DialogDescription>
-              {editingId ? 'Update this customer’s details.' : 'Create a new customer record.'}
+              {editingId !== null ? 'Update this customer’s details.' : 'Create a new customer record.'}
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-2">
@@ -350,11 +409,12 @@ export default function CustomersPage() {
                 <Input id="seats" type="number" min={0} value={form.seats} onChange={(e) => setForm({ ...form, seats: Number(e.target.value) })} />
               </div>
             </div>
+            {formError && <p className="text-sm text-destructive">{formError}</p>}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setEditorOpen(false)}>Cancel</Button>
-            <Button onClick={save} disabled={!form.name.trim() || !form.email.trim()}>
-              {editingId ? 'Save changes' : 'Create'}
+            <Button variant="outline" onClick={() => setEditorOpen(false)} disabled={saving}>Cancel</Button>
+            <Button onClick={save} disabled={saving || !form.name.trim() || !form.email.trim()}>
+              {saving ? 'Saving…' : editingId !== null ? 'Save changes' : 'Create'}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -371,8 +431,10 @@ export default function CustomersPage() {
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteTarget(null)}>Cancel</Button>
-            <Button variant="destructive" onClick={confirmDelete}>Delete</Button>
+            <Button variant="outline" onClick={() => setDeleteTarget(null)} disabled={deleting}>Cancel</Button>
+            <Button variant="destructive" onClick={confirmDelete} disabled={deleting}>
+              {deleting ? 'Deleting…' : 'Delete'}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

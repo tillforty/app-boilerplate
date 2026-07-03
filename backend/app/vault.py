@@ -11,9 +11,18 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
 from . import db
-from .auth import UserOut, get_current_user
+from .auth import UserOut
+from .roles import require_permission
 
 VAULT_KEY = os.environ.get("VAULT_KEY", "")
+
+if not VAULT_KEY:
+    # Without a key, secrets would be encrypted with an empty passphrase —
+    # effectively plaintext. Refuse to start. start.sh / setup.sh generate this.
+    raise RuntimeError(
+        "VAULT_KEY is not set. Generate one (e.g. `openssl rand -hex 32`) and "
+        "set it in the environment before starting the API."
+    )
 
 router = APIRouter(prefix="/vault", tags=["vault"])
 
@@ -66,12 +75,16 @@ class SecretOut(BaseModel):
 
 
 @router.put("", status_code=status.HTTP_204_NO_CONTENT)
-async def put_secret(body: SecretIn, _: UserOut = Depends(get_current_user)) -> None:
+async def put_secret(
+    body: SecretIn, _: UserOut = Depends(require_permission("vault:write"))
+) -> None:
     await set_secret(body.name, body.value)
 
 
 @router.get("/{name}", response_model=SecretOut)
-async def read_secret(name: str, _: UserOut = Depends(get_current_user)) -> SecretOut:
+async def read_secret(
+    name: str, _: UserOut = Depends(require_permission("vault:read"))
+) -> SecretOut:
     value = await get_secret(name)
     if value is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Secret not found")
