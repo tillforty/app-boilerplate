@@ -18,14 +18,15 @@ import {
   type ReactNode,
 } from 'react'
 import { en, type Dictionary } from './en'
+import { lt } from './lt'
 
-export type Language = 'en'
+export type Language = 'en' | 'lt'
 
 /** Registered dictionaries. Add more languages here. */
-const dictionaries: Record<Language, Dictionary> = { en }
+const dictionaries: Record<Language, Dictionary> = { en, lt }
 
 /** Human-readable names shown in the language switcher. */
-export const LANGUAGE_LABELS: Record<Language, string> = { en: 'English' }
+export const LANGUAGE_LABELS: Record<Language, string> = { en: 'English', lt: 'Lietuvių' }
 
 const DEFAULT_LANGUAGE: Language = 'en'
 const STORAGE_KEY = 'tf_lang'
