@@ -64,9 +64,35 @@ docker compose logs caddy  # cert issuance specifically
 | `GIT_URL` | this repo | Source repo to deploy. |
 | `BRANCH` | `main` | Branch to deploy. |
 | `APP_DIR` | `/opt/app-boilerplate` | Checkout location on the server. |
+| `GITHUB_TOKEN` / `GH_TOKEN` | _(unset)_ | Token for cloning a **private** repo (`contents:read`). See below. |
 
 `deploy.sh` is **idempotent** — re-running it does `git pull` + rebuild and
 preserves the database, uploaded files, and secrets. Use it as your update path too.
+
+### Private repositories
+
+If the source repo is **private**, two things need auth that a public repo doesn't:
+
+1. **Fetching `deploy.sh`** — the `curl … | bash` one-liner pulls the script from
+   `raw.githubusercontent.com`, which returns **404** for a private repo. Either
+   download it with an auth header, or (simpler) clone the repo first and run
+   `./deploy.sh` from the checkout.
+2. **The clone/pull inside `deploy.sh`** — the script runs `git` as **root** via
+   `sudo`, and root does *not* inherit your login user's credential helper (e.g.
+   `~/.git-credentials`). Pass a token in the environment and it's injected into
+   the HTTPS remote for the clone/fetch only (never written to the stored remote):
+
+   ```bash
+   # From a checkout of a private repo:
+   sudo GITHUB_TOKEN=ghp_xxx DOMAIN=app.example.com ACME_EMAIL=ops@example.com ./deploy.sh
+
+   # Or fetch the script with auth, then pipe:
+   curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" \
+     https://raw.githubusercontent.com/<owner>/<repo>/main/deploy.sh \
+     | GITHUB_TOKEN=$GITHUB_TOKEN DOMAIN=app.example.com ACME_EMAIL=ops@example.com bash
+   ```
+
+   Use a fine-grained PAT scoped to the repo with **Contents: read**.
 
 ---
 
