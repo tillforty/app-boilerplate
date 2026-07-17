@@ -107,6 +107,43 @@ export async function completeOAuthLogin(token: string): Promise<User> {
   return user
 }
 
+export interface InviteOut {
+  id: number
+  email: string
+  role_id: number | null
+  role_name: string | null
+  invited_by_name: string | null
+  expires_at: string
+  created_at: string
+  invite_url: string
+  email_sent: boolean
+}
+
+export interface InviteInfo {
+  email: string
+  role_name: string | null
+  expires_at: string
+}
+
+export async function sendInvite(email: string, role_id?: number): Promise<InviteOut> {
+  return api.post<InviteOut>('/auth/invites', { email, role_id: role_id ?? null })
+}
+
+export async function listInvites(): Promise<InviteOut[]> {
+  return api.get<InviteOut[]>('/auth/invites')
+}
+
+export async function getInvite(token: string): Promise<InviteInfo> {
+  return api.get<InviteInfo>(`/auth/invites/${token}`)
+}
+
+export async function acceptInvite(
+  token: string,
+  data: { name: string; surname: string; password: string },
+): Promise<{ message: string }> {
+  return api.post<{ message: string }>(`/auth/invites/${token}/accept`, data)
+}
+
 export interface DemoInfo {
   enabled: boolean
   username?: string | null
