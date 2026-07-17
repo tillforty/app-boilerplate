@@ -10,6 +10,7 @@ import UsersPage from '@/pages/UsersPage'
 import RolesPage from '@/pages/RolesPage'
 import ProfilePage from '@/pages/ProfilePage'
 import DocumentsPage from '@/pages/DocumentsPage'
+import AcceptInvitePage from '@/pages/AcceptInvitePage'
 
 export default function App() {
   return (
@@ -17,6 +18,7 @@ export default function App() {
       {/* Public */}
       <Route path="/login" element={<LoginPage />} />
       <Route path="/auth/callback" element={<OAuthCallback />} />
+      <Route path="/invite/:token" element={<AcceptInvitePage />} />
 
       {/* Authenticated app shell */}
       <Route element={<ProtectedRoute />}>
