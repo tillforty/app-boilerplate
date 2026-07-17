@@ -38,7 +38,7 @@ export default function Header() {
   }
 
   return (
-    <header className="grid h-14 grid-cols-[auto_1fr_auto] items-center gap-6 border-b bg-white px-6">
+    <header className="grid h-14 grid-cols-[auto_1fr_auto] items-center gap-2 border-b bg-white px-3 sm:gap-3 sm:px-4 md:gap-6 md:px-6">
       {/* Logo */}
       <Link to="/" className="flex items-center shrink-0">
         <img src={brand.logoSrc} alt={brand.name} className="h-5" />

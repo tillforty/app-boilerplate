@@ -75,7 +75,7 @@ export default function Header() {
   }
 
   return (
-    <header className="grid h-14 grid-cols-[auto_1fr_auto] items-center gap-3 border-b bg-white px-4 md:gap-6 md:px-6">
+    <header className="grid h-14 grid-cols-[auto_1fr_auto] items-center gap-2 border-b bg-white px-3 sm:gap-3 sm:px-4 md:gap-6 md:px-6">
       {/* Left: mobile menu trigger + logo */}
       <div className="flex items-center gap-2">
         <Button
@@ -93,7 +93,7 @@ export default function Header() {
       </div>
 
       {/* Horizontal nav — centered, driven by app-config. Hidden on mobile. */}
-      <nav className="hidden items-center justify-center gap-1 md:flex">
+      <nav className="hidden min-w-0 items-center justify-center gap-1 md:flex">
         {nav.map((item) => (
           <Link
             key={item.href}
