@@ -251,7 +251,7 @@ export default function CustomersPage() {
       </div>
 
       {/* Table */}
-      <div className="rounded-lg border">
+      <div className="overflow-x-auto rounded-lg border">
         <Table>
           <TableHeader>
             <TableRow>
