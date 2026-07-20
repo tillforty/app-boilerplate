@@ -20,6 +20,11 @@
 # Prerequisites you must do yourself (DNS + firewall — see DEPLOY.md):
 #   • An A record for $DOMAIN pointing at this server's public IP.
 #   • Inbound TCP 80 and 443 open. (Cert issuance fails without both.)
+#   • PRIVATE repo? This script clones as root (via sudo), which can't see a
+#     per-user credential helper — so pass a token: GITHUB_TOKEN=<pat>. Public
+#     repos need nothing. Note the `curl … | bash` one-liner itself fetches
+#     deploy.sh from raw.githubusercontent.com, which also 404s for a private
+#     repo — download the script with an auth header (or from a checkout) first.
 #
 # Tunables (all optional, via environment):
 #   DOMAIN                  public hostname; omit for a local-only (no-TLS) run
@@ -31,6 +36,7 @@
 #   GIT_URL                 repo to deploy (default: this repo on GitHub)
 #   BRANCH                  branch to deploy (default: main)
 #   APP_DIR                 checkout location (default: /opt/app-boilerplate)
+#   GITHUB_TOKEN / GH_TOKEN token for cloning a PRIVATE repo (contents:read)
 #
 set -euo pipefail
 
@@ -76,15 +82,36 @@ docker compose version >/dev/null 2>&1 || command -v docker-compose >/dev/null 2
   || die "Docker Compose plugin missing. See https://docs.docker.com/compose/install/"
 
 # ── Clone or update the repo ─────────────────────────────────────────────────
+# Private-repo auth: this script runs git as root (via sudo), which does NOT see
+# a per-user credential helper (e.g. ~/.git-credentials belongs to your login
+# user, not root). So for a PRIVATE repo, pass a token in the environment and we
+# inject it into the HTTPS URL for the clone/fetch. Set GITHUB_TOKEN (or GH_TOKEN)
+# to a PAT / fine-grained token with `contents:read` on the repo.
+CLONE_URL="$GIT_URL"
+GIT_TOKEN="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
+if [ -n "$GIT_TOKEN" ]; then
+  case "$GIT_URL" in
+    https://github.com/*)
+      CLONE_URL="https://x-access-token:${GIT_TOKEN}@github.com/${GIT_URL#https://github.com/}"
+      info "Using GITHUB_TOKEN for private-repo access." ;;
+    *) warn "GITHUB_TOKEN set but GIT_URL isn't an https://github.com URL — ignoring." ;;
+  esac
+fi
+
 if [ -d "$APP_DIR/.git" ]; then
   info "Updating existing checkout at $APP_DIR…"
+  [ -n "$GIT_TOKEN" ] && $SUDO git -C "$APP_DIR" remote set-url origin "$CLONE_URL"
   $SUDO git -C "$APP_DIR" fetch --quiet origin "$BRANCH"
   $SUDO git -C "$APP_DIR" checkout --quiet "$BRANCH"
   $SUDO git -C "$APP_DIR" reset --hard --quiet "origin/$BRANCH"
+  # Don't leave the token baked into the checkout's remote URL.
+  [ -n "$GIT_TOKEN" ] && $SUDO git -C "$APP_DIR" remote set-url origin "$GIT_URL"
 else
   info "Cloning $GIT_URL → $APP_DIR…"
   $SUDO mkdir -p "$(dirname "$APP_DIR")"
-  $SUDO git clone --quiet --branch "$BRANCH" "$GIT_URL" "$APP_DIR"
+  $SUDO git clone --quiet --branch "$BRANCH" "$CLONE_URL" "$APP_DIR"
+  # Reset the stored remote to the clean, token-free URL.
+  [ -n "$GIT_TOKEN" ] && $SUDO git -C "$APP_DIR" remote set-url origin "$GIT_URL"
 fi
 
 # ── Launch ───────────────────────────────────────────────────────────────────
