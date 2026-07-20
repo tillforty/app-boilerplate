@@ -74,14 +74,80 @@ export async function changePassword(
   await api.post<void>('/auth/change-password', { current_password, new_password })
 }
 
-/** A row in the users admin table: identity + role name + join date. */
+export type UserStatus = 'active' | 'pending' | 'inactive'
+
+/** A row in the users admin table: identity + role name + lifecycle status. */
 export interface UserRow extends User {
   role: string | null
+  status: UserStatus
+  /** Only present on pending users, and only for callers with 'users:create'. */
+  invite_token: string | null
   created_at: string
 }
 
 export async function listUsers(): Promise<UserRow[]> {
   return api.get<UserRow[]>('/auth/users')
+}
+
+export interface NewUser {
+  name: string
+  surname: string
+  email: string
+  password: string
+  role_id?: number // defaults to the 'member' role on the backend
+}
+
+/** Admin-create a user (requires the 'users:create' permission). */
+export async function createUser(body: NewUser): Promise<UserRow> {
+  return api.post<UserRow>('/auth/users', body)
+}
+
+export interface InviteResult extends UserRow {
+  invite_url: string
+  email_sent: boolean
+}
+
+/** Invite a user by email: they arrive as 'pending' until they accept. */
+export async function inviteUser(body: Omit<NewUser, 'password'>): Promise<InviteResult> {
+  return api.post<InviteResult>('/auth/users/invite', body)
+}
+
+/** Issue a fresh invite token (and re-email it when SMTP is configured). */
+export async function resendInvite(userId: number): Promise<InviteResult> {
+  return api.post<InviteResult>(`/auth/users/${userId}/invite/resend`, {})
+}
+
+/** Archive a user (soft delete): keeps their data, blocks their login. */
+export async function deactivateUser(userId: number): Promise<void> {
+  await api.post<void>(`/auth/users/${userId}/deactivate`, {})
+}
+
+/** Restore an inactive user (back to pending if they never set a password). */
+export async function activateUser(userId: number): Promise<void> {
+  await api.post<void>(`/auth/users/${userId}/activate`, {})
+}
+
+/** The browser-facing URL of the public acceptance page for an invite token. */
+export function inviteUrl(token: string): string {
+  return `${window.location.origin}/invite/${token}`
+}
+
+export interface InviteInfo {
+  name: string
+  surname: string
+  email: string
+}
+
+/** Public: who an invitation is for (404 = invalid, 410 = expired). */
+export async function getInvite(token: string): Promise<InviteInfo> {
+  return api.get<InviteInfo>(`/auth/invite/${token}`)
+}
+
+/** Public: accept an invitation — sets the password and logs the user in. */
+export async function acceptInvite(token: string, password: string): Promise<User> {
+  const res = await api.post<LoginResponse>(`/auth/invite/${token}/accept`, { password })
+  store(res.access_token, res.user)
+  return res.user
 }
 
 export interface AuthProvider {
