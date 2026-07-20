@@ -9,7 +9,11 @@
       "title": "Tillforty theme tokens",
       "description": "CSS variables + base layer for the Tillforty design system.",
       "files": [
-        { "path": "registry/theme/tokens.css", "type": "registry:file", "target": "src/index.css" }
+        {
+          "path": "registry/theme/tokens.css",
+          "type": "registry:file",
+          "target": "src/index.css"
+        }
       ]
     },
     {
@@ -17,25 +21,70 @@
       "type": "registry:lib",
       "title": "Core lib (cn + API client)",
       "description": "cn() helper and the authed fetch API client.",
-      "dependencies": ["clsx", "tailwind-merge"],
+      "dependencies": [
+        "clsx",
+        "tailwind-merge"
+      ],
       "files": [
-        { "path": "registry/lib/utils.ts", "type": "registry:lib", "target": "src/lib/utils.ts" },
-        { "path": "registry/lib/api.ts", "type": "registry:lib", "target": "src/lib/api.ts" }
+        {
+          "path": "registry/lib/utils.ts",
+          "type": "registry:lib",
+          "target": "src/lib/utils.ts"
+        },
+        {
+          "path": "registry/lib/api.ts",
+          "type": "registry:lib",
+          "target": "src/lib/api.ts"
+        }
       ]
     },
     {
       "name": "auth",
       "type": "registry:block",
       "title": "Auth scaffold",
-      "description": "JWT auth + optional Google/Microsoft SSO: context provider, protected route, login page, OAuth callback, and auth API helpers.",
-      "registryDependencies": ["lib", "i18n", "button", "input", "label", "card"],
-      "dependencies": ["react-router-dom"],
+      "description": "JWT auth + optional Google/Microsoft SSO: context provider, protected route, login page, OAuth callback, public invitation acceptance page, and auth API helpers.",
+      "registryDependencies": [
+        "lib",
+        "i18n",
+        "button",
+        "input",
+        "label",
+        "card"
+      ],
+      "dependencies": [
+        "react-router-dom"
+      ],
       "files": [
-        { "path": "registry/lib/auth.ts", "type": "registry:lib", "target": "src/lib/auth.ts" },
-        { "path": "registry/blocks/auth/AuthContext.tsx", "type": "registry:component", "target": "src/context/AuthContext.tsx" },
-        { "path": "registry/blocks/auth/ProtectedRoute.tsx", "type": "registry:component", "target": "src/components/ProtectedRoute.tsx" },
-        { "path": "registry/blocks/auth/LoginPage.tsx", "type": "registry:component", "target": "src/pages/LoginPage.tsx" },
-        { "path": "registry/blocks/auth/OAuthCallback.tsx", "type": "registry:component", "target": "src/pages/OAuthCallback.tsx" }
+        {
+          "path": "registry/lib/auth.ts",
+          "type": "registry:lib",
+          "target": "src/lib/auth.ts"
+        },
+        {
+          "path": "registry/blocks/auth/AuthContext.tsx",
+          "type": "registry:component",
+          "target": "src/context/AuthContext.tsx"
+        },
+        {
+          "path": "registry/blocks/auth/ProtectedRoute.tsx",
+          "type": "registry:component",
+          "target": "src/components/ProtectedRoute.tsx"
+        },
+        {
+          "path": "registry/blocks/auth/LoginPage.tsx",
+          "type": "registry:component",
+          "target": "src/pages/LoginPage.tsx"
+        },
+        {
+          "path": "registry/blocks/auth/OAuthCallback.tsx",
+          "type": "registry:component",
+          "target": "src/pages/OAuthCallback.tsx"
+        },
+        {
+          "path": "registry/blocks/auth/InvitePage.tsx",
+          "target": "src/pages/InvitePage.tsx",
+          "type": "registry:component"
+        }
       ]
     },
     {
@@ -54,12 +103,31 @@
         "sheet",
         "separator"
       ],
-      "dependencies": ["lucide-react", "react-router-dom"],
+      "dependencies": [
+        "lucide-react",
+        "react-router-dom"
+      ],
       "files": [
-        { "path": "registry/config/app-config.tsx", "type": "registry:component", "target": "src/config/app-config.tsx" },
-        { "path": "registry/blocks/app-shell/AppLayout.tsx", "type": "registry:component", "target": "src/components/layout/AppLayout.tsx" },
-        { "path": "registry/blocks/app-shell/Header.tsx", "type": "registry:component", "target": "src/components/layout/Header.tsx" },
-        { "path": "registry/blocks/app-shell/Sidebar.tsx", "type": "registry:component", "target": "src/components/layout/Sidebar.tsx" }
+        {
+          "path": "registry/config/app-config.tsx",
+          "type": "registry:component",
+          "target": "src/config/app-config.tsx"
+        },
+        {
+          "path": "registry/blocks/app-shell/AppLayout.tsx",
+          "type": "registry:component",
+          "target": "src/components/layout/AppLayout.tsx"
+        },
+        {
+          "path": "registry/blocks/app-shell/Header.tsx",
+          "type": "registry:component",
+          "target": "src/components/layout/Header.tsx"
+        },
+        {
+          "path": "registry/blocks/app-shell/Sidebar.tsx",
+          "type": "registry:component",
+          "target": "src/components/layout/Sidebar.tsx"
+        }
       ]
     },
     {
@@ -67,13 +135,73 @@
       "type": "registry:block",
       "title": "Roles & permissions (RBAC)",
       "description": "Role management UI with permission checkboxes, a usePermissions hook, and a PermissionGate. Pairs with the backend roles router.",
-      "registryDependencies": ["auth", "i18n", "button", "card", "dialog", "checkbox", "input", "label", "badge"],
-      "dependencies": ["lucide-react"],
+      "registryDependencies": [
+        "auth",
+        "i18n",
+        "button",
+        "card",
+        "dialog",
+        "checkbox",
+        "input",
+        "label",
+        "badge"
+      ],
+      "dependencies": [
+        "lucide-react"
+      ],
       "files": [
-        { "path": "registry/lib/roles.ts", "type": "registry:lib", "target": "src/lib/roles.ts" },
-        { "path": "registry/blocks/roles/PermissionsContext.tsx", "type": "registry:component", "target": "src/context/PermissionsContext.tsx" },
-        { "path": "registry/blocks/roles/PermissionGate.tsx", "type": "registry:component", "target": "src/components/PermissionGate.tsx" },
-        { "path": "registry/blocks/roles/RolesPage.tsx", "type": "registry:component", "target": "src/pages/RolesPage.tsx" }
+        {
+          "path": "registry/lib/roles.ts",
+          "type": "registry:lib",
+          "target": "src/lib/roles.ts"
+        },
+        {
+          "path": "registry/blocks/roles/PermissionsContext.tsx",
+          "type": "registry:component",
+          "target": "src/context/PermissionsContext.tsx"
+        },
+        {
+          "path": "registry/blocks/roles/PermissionGate.tsx",
+          "type": "registry:component",
+          "target": "src/components/PermissionGate.tsx"
+        },
+        {
+          "path": "registry/blocks/roles/RolesPage.tsx",
+          "type": "registry:component",
+          "target": "src/pages/RolesPage.tsx"
+        }
+      ]
+    },
+    {
+      "name": "users",
+      "type": "registry:block",
+      "title": "User management",
+      "description": "Users admin page with Active/Pending/Inactive lifecycle tabs, invite-by-email or set-password creation, role assignment, and a per-user kebab menu (deactivate/activate, resend or copy invitation link). Pairs with the backend auth router user endpoints.",
+      "dependencies": [
+        "lucide-react"
+      ],
+      "registryDependencies": [
+        "auth",
+        "roles",
+        "i18n",
+        "button",
+        "badge",
+        "avatar",
+        "dialog",
+        "dropdown-menu",
+        "input",
+        "label",
+        "select",
+        "skeleton",
+        "table",
+        "tabs"
+      ],
+      "files": [
+        {
+          "path": "registry/blocks/users/UsersPage.tsx",
+          "target": "src/pages/UsersPage.tsx",
+          "type": "registry:component"
+        }
       ]
     },
     {
@@ -82,7 +210,11 @@
       "title": "n8n webhook client",
       "description": "Helper that builds n8n webhook URLs from VITE_N8N_WEBHOOK_URL / VITE_N8N_BASE_URL (never hardcoded) and POSTs payloads to them.",
       "files": [
-        { "path": "registry/lib/n8n.ts", "type": "registry:lib", "target": "src/lib/n8n.ts" }
+        {
+          "path": "registry/lib/n8n.ts",
+          "type": "registry:lib",
+          "target": "src/lib/n8n.ts"
+        }
       ]
     },
     {
@@ -90,12 +222,29 @@
       "type": "registry:block",
       "title": "Internationalization (i18n)",
       "description": "Dependency-free i18n: I18nProvider, useTranslation t() with interpolation, an English translations file, and a language switcher. Add languages by dropping in a dictionary.",
-      "registryDependencies": ["button", "dropdown-menu"],
-      "dependencies": ["lucide-react"],
+      "registryDependencies": [
+        "button",
+        "dropdown-menu"
+      ],
+      "dependencies": [
+        "lucide-react"
+      ],
       "files": [
-        { "path": "registry/i18n/en.ts", "type": "registry:lib", "target": "src/i18n/en.ts" },
-        { "path": "registry/i18n/index.tsx", "type": "registry:lib", "target": "src/i18n/index.tsx" },
-        { "path": "registry/i18n/LanguageSwitcher.tsx", "type": "registry:component", "target": "src/i18n/LanguageSwitcher.tsx" }
+        {
+          "path": "registry/i18n/en.ts",
+          "type": "registry:lib",
+          "target": "src/i18n/en.ts"
+        },
+        {
+          "path": "registry/i18n/index.tsx",
+          "type": "registry:lib",
+          "target": "src/i18n/index.tsx"
+        },
+        {
+          "path": "registry/i18n/LanguageSwitcher.tsx",
+          "type": "registry:component",
+          "target": "src/i18n/LanguageSwitcher.tsx"
+        }
       ]
     }
   ]
