@@ -1,15 +1,40 @@
 import { useEffect, useState } from 'react'
-import { Copy, Check, UserPlus, Mail } from 'lucide-react'
-import { listUsers, sendInvite, listInvites, type UserRow, type InviteOut } from '@/lib/auth'
+import { Check, Copy, MoreHorizontal, Plus } from 'lucide-react'
+import {
+  activateUser,
+  createUser,
+  deactivateUser,
+  inviteUrl,
+  inviteUser,
+  listUsers,
+  resendInvite,
+  type UserRow,
+  type UserStatus,
+} from '@/lib/auth'
 import { listRoles, assignRole, type Role } from '@/lib/roles'
 import { usePermissions } from '@/context/PermissionsContext'
 import { useTranslation } from '@/i18n'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Table,
   TableBody,
@@ -25,14 +50,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
 
 function initials(name: string, surname: string): string {
   return `${name.charAt(0)}${surname.charAt(0)}`.toUpperCase() || '?'
@@ -45,52 +62,39 @@ function formatDate(iso: string): string {
     : d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
 }
 
-function CopyButton({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false)
-  function copy() {
-    void navigator.clipboard.writeText(text).then(() => {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    })
-  }
-  return (
-    <Button type="button" variant="outline" size="icon" className="h-8 w-8 shrink-0" onClick={copy}>
-      {copied ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
-    </Button>
-  )
-}
-
 export default function UsersPage() {
   const { t } = useTranslation()
   const { can } = usePermissions()
   const canManage = can('users:update')
-  const canInvite = can('users:create')
+  const canCreate = can('users:create')
+  const canArchive = can('users:delete')
 
   const [users, setUsers] = useState<UserRow[]>([])
   const [roles, setRoles] = useState<Role[]>([])
-  const [pendingInvites, setPendingInvites] = useState<InviteOut[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+  const [tab, setTab] = useState<UserStatus>('active')
 
-  // Invite dialog state
-  const [inviteOpen, setInviteOpen] = useState(false)
-  const [inviteEmail, setInviteEmail] = useState('')
-  const [inviteRoleId, setInviteRoleId] = useState<string>('')
-  const [inviting, setInviting] = useState(false)
-  const [inviteResult, setInviteResult] = useState<InviteOut | null>(null)
-  const [inviteError, setInviteError] = useState<string | null>(null)
+  const emptyForm = { name: '', surname: '', email: '', password: '', roleId: '' }
+  const [createOpen, setCreateOpen] = useState(false)
+  const [inviteMode, setInviteMode] = useState(true)
+  const [form, setForm] = useState(emptyForm)
+  const [creating, setCreating] = useState(false)
+  const [createError, setCreateError] = useState<string | null>(null)
+  // After a successful invite: show the link so it can be copied even without SMTP.
+  const [inviteResult, setInviteResult] = useState<{ email: string; url: string; sent: boolean } | null>(null)
+  const [copied, setCopied] = useState(false)
 
   async function load() {
     setLoading(true)
     try {
-      const [u, r, inv] = await Promise.all([
+      const [u, r] = await Promise.all([
         listUsers(),
-        canManage || canInvite ? listRoles() : Promise.resolve([]),
-        canInvite ? listInvites() : Promise.resolve([]),
+        canManage || canCreate ? listRoles() : Promise.resolve([]),
       ])
       setUsers(u)
       setRoles(r)
-      setPendingInvites(inv)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load users')
     } finally {
@@ -120,47 +124,134 @@ export default function UsersPage() {
     }
   }
 
-  function openInvite() {
-    setInviteEmail('')
-    setInviteRoleId('')
+  function openCreate() {
+    setForm(emptyForm)
+    setCreateError(null)
     setInviteResult(null)
-    setInviteError(null)
-    setInviteOpen(true)
+    setCopied(false)
+    setCreateOpen(true)
   }
 
-  async function submitInvite() {
-    if (!inviteEmail.trim()) return
-    setInviting(true)
-    setInviteError(null)
+  async function onCreate() {
+    setCreating(true)
+    setCreateError(null)
     try {
-      const result = await sendInvite(inviteEmail.trim(), inviteRoleId ? Number(inviteRoleId) : undefined)
-      setInviteResult(result)
-      setPendingInvites((prev) => [result, ...prev])
+      const base = {
+        name: form.name,
+        surname: form.surname,
+        email: form.email,
+        ...(form.roleId ? { role_id: Number(form.roleId) } : {}),
+      }
+      if (inviteMode) {
+        const res = await inviteUser(base)
+        setUsers((prev) => [...prev, res])
+        setInviteResult({ email: res.email, url: res.invite_url, sent: res.email_sent })
+        setTab('pending')
+      } else {
+        const created = await createUser({ ...base, password: form.password })
+        setUsers((prev) => [...prev, created])
+        setCreateOpen(false)
+        setTab('active')
+      }
     } catch (e) {
-      setInviteError(e instanceof Error ? e.message : 'Failed to send invite')
+      setCreateError(e instanceof Error ? e.message : t('users.createFailed'))
     } finally {
-      setInviting(false)
+      setCreating(false)
     }
   }
 
-  function closeInviteDialog() {
-    setInviteOpen(false)
-    setInviteResult(null)
+  async function copyUrl(url: string) {
+    try {
+      await navigator.clipboard.writeText(url)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      // Clipboard can be unavailable (http, permissions) — surface the URL instead.
+      window.prompt(t('users.copyInviteUrl'), url)
+    }
   }
 
-  const colSpan = canManage ? 5 : 4
+  async function onResend(u: UserRow) {
+    setError(null)
+    setNotice(null)
+    try {
+      const res = await resendInvite(u.id)
+      setUsers((prev) => prev.map((x) => (x.id === u.id ? { ...x, ...res } : x)))
+      setNotice(
+        res.email_sent
+          ? t('users.inviteEmailSent', { email: res.email })
+          : t('users.inviteResent', { email: res.email }),
+      )
+    } catch (e) {
+      setError(e instanceof Error ? e.message : t('users.actionFailed'))
+    }
+  }
+
+  async function onCopyRowUrl(u: UserRow) {
+    if (!u.invite_token) return
+    setNotice(null)
+    try {
+      await navigator.clipboard.writeText(inviteUrl(u.invite_token))
+      setNotice(t('users.copied'))
+    } catch {
+      window.prompt(t('users.copyInviteUrl'), inviteUrl(u.invite_token))
+    }
+  }
+
+  async function onDeactivate(u: UserRow) {
+    if (!window.confirm(t('users.deactivateConfirm', { name: `${u.name} ${u.surname}` }))) return
+    setError(null)
+    setNotice(null)
+    try {
+      await deactivateUser(u.id)
+      setUsers((prev) => prev.map((x) => (x.id === u.id ? { ...x, status: 'inactive' } : x)))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : t('users.actionFailed'))
+    }
+  }
+
+  async function onActivate(u: UserRow) {
+    setError(null)
+    setNotice(null)
+    try {
+      await activateUser(u.id)
+      // Users who never set a password go back to pending, not active.
+      const next: UserStatus = u.invite_token != null ? 'pending' : 'active'
+      setUsers((prev) => prev.map((x) => (x.id === u.id ? { ...x, status: next } : x)))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : t('users.actionFailed'))
+    }
+  }
+
+  const visible = users.filter((u) => u.status === tab)
+  const counts = {
+    active: users.filter((u) => u.status === 'active').length,
+    pending: users.filter((u) => u.status === 'pending').length,
+    inactive: users.filter((u) => u.status === 'inactive').length,
+  }
+
+  const showKebab = canArchive || canCreate
+  const colSpan = 4 + (canManage ? 1 : 0) + (showKebab ? 1 : 0)
+  const emptyText =
+    tab === 'pending' ? t('users.emptyPending') : tab === 'inactive' ? t('users.emptyInactive') : t('users.empty')
+
+  const formValid =
+    form.name.trim() &&
+    form.surname.trim() &&
+    form.email.trim() &&
+    (inviteMode || form.password.length >= 8)
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+      <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold">{t('nav.users')}</h1>
           <p className="text-sm text-muted-foreground">People with access to this app.</p>
         </div>
-        {canInvite && (
-          <Button onClick={openInvite} className="w-full sm:w-auto">
-            <UserPlus className="mr-2 h-4 w-4" />
-            Invite user
+        {canCreate && (
+          <Button onClick={openCreate}>
+            <Plus className="mr-2 h-4 w-4" />
+            {t('users.newUser')}
           </Button>
         )}
       </div>
@@ -170,8 +261,27 @@ export default function UsersPage() {
           {error}
         </div>
       )}
+      {notice && (
+        <div className="rounded-md border border-primary/40 bg-primary/10 px-4 py-2 text-sm">
+          {notice}
+        </div>
+      )}
 
-      <div className="overflow-x-auto rounded-lg border">
+      <Tabs value={tab} onValueChange={(v) => setTab(v as UserStatus)}>
+        <TabsList>
+          <TabsTrigger value="active">
+            {t('users.tabActive')} ({counts.active})
+          </TabsTrigger>
+          <TabsTrigger value="pending">
+            {t('users.tabPending')} ({counts.pending})
+          </TabsTrigger>
+          <TabsTrigger value="inactive">
+            {t('users.tabInactive')} ({counts.inactive})
+          </TabsTrigger>
+        </TabsList>
+      </Tabs>
+
+      <div className="rounded-lg border">
         <Table>
           <TableHeader>
             <TableRow>
@@ -180,6 +290,7 @@ export default function UsersPage() {
               <TableHead>{t('users.colRole')}</TableHead>
               <TableHead>{t('users.colJoined')}</TableHead>
               {canManage && <TableHead className="text-right">{t('users.colActions')}</TableHead>}
+              {showKebab && <TableHead className="w-10" />}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -196,16 +307,17 @@ export default function UsersPage() {
                   <TableCell><Skeleton className="h-5 w-16 rounded-full" /></TableCell>
                   <TableCell><Skeleton className="h-4 w-20" /></TableCell>
                   {canManage && <TableCell><Skeleton className="ml-auto h-9 w-32" /></TableCell>}
+                  {showKebab && <TableCell><Skeleton className="h-8 w-8" /></TableCell>}
                 </TableRow>
               ))
-            ) : users.length === 0 ? (
+            ) : visible.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={colSpan} className="h-24 text-center text-muted-foreground">
-                  {t('users.empty')}
+                  {emptyText}
                 </TableCell>
               </TableRow>
             ) : (
-              users.map((u) => (
+              visible.map((u) => (
                 <TableRow key={u.id}>
                   <TableCell>
                     <div className="flex items-center gap-3">
@@ -249,6 +361,44 @@ export default function UsersPage() {
                       </Select>
                     </TableCell>
                   )}
+                  {showKebab && (
+                    <TableCell>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon" className="h-8 w-8">
+                            <MoreHorizontal className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          {u.status === 'pending' && canCreate && (
+                            <>
+                              <DropdownMenuItem onClick={() => void onResend(u)}>
+                                {t('users.resendInvite')}
+                              </DropdownMenuItem>
+                              {u.invite_token && (
+                                <DropdownMenuItem onClick={() => void onCopyRowUrl(u)}>
+                                  {t('users.copyInviteUrl')}
+                                </DropdownMenuItem>
+                              )}
+                            </>
+                          )}
+                          {u.status !== 'inactive' && canArchive && (
+                            <DropdownMenuItem
+                              className="text-destructive focus:text-destructive"
+                              onClick={() => void onDeactivate(u)}
+                            >
+                              {t('users.deactivate')}
+                            </DropdownMenuItem>
+                          )}
+                          {u.status === 'inactive' && canArchive && (
+                            <DropdownMenuItem onClick={() => void onActivate(u)}>
+                              {t('users.activate')}
+                            </DropdownMenuItem>
+                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </TableCell>
+                  )}
                 </TableRow>
               ))
             )}
@@ -256,114 +406,107 @@ export default function UsersPage() {
         </Table>
       </div>
 
-      {/* Pending invites */}
-      {canInvite && pendingInvites.length > 0 && (
-        <div className="space-y-3">
-          <h2 className="text-sm font-medium text-muted-foreground">Pending invites</h2>
-          <div className="overflow-x-auto rounded-lg border">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Email</TableHead>
-                  <TableHead>Role</TableHead>
-                  <TableHead>Expires</TableHead>
-                  <TableHead>Invite link</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {pendingInvites.map((inv) => (
-                  <TableRow key={inv.id}>
-                    <TableCell className="font-medium">{inv.email}</TableCell>
-                    <TableCell>
-                      {inv.role_name ? (
-                        <Badge variant="secondary" className="capitalize">{inv.role_name}</Badge>
-                      ) : (
-                        <span className="text-muted-foreground">—</span>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground">{formatDate(inv.expires_at)}</TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <span className="max-w-[220px] truncate font-mono text-xs text-muted-foreground">
-                          {inv.invite_url}
-                        </span>
-                        <CopyButton text={inv.invite_url} />
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        </div>
-      )}
-
-      {/* Invite dialog */}
-      <Dialog open={inviteOpen} onOpenChange={(o) => { if (!o) closeInviteDialog() }}>
+      <Dialog open={createOpen} onOpenChange={(o) => !o && setCreateOpen(false)}>
         <DialogContent className="sm:max-w-md">
           {inviteResult ? (
             <>
               <DialogHeader>
-                <DialogTitle>Invite sent</DialogTitle>
+                <DialogTitle>{t('users.inviteCreatedTitle')}</DialogTitle>
                 <DialogDescription>
-                  {inviteResult.email_sent
-                    ? `An invite email was sent to ${inviteResult.email}.`
-                    : `Email is not configured — share this link directly with ${inviteResult.email}.`}
+                  {inviteResult.sent
+                    ? t('users.inviteEmailSent', { email: inviteResult.email })
+                    : t('users.inviteEmailNotSent', { email: inviteResult.email })}
                 </DialogDescription>
               </DialogHeader>
-
-              <div className="space-y-3 py-2">
-                {inviteResult.email_sent && (
-                  <div className="flex items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-                    <Mail className="h-4 w-4 shrink-0" />
-                    Invite email delivered
-                  </div>
-                )}
-                <div className="space-y-1.5">
-                  <Label className="text-xs text-muted-foreground">Invite link (valid 72 hours)</Label>
-                  <div className="flex items-center gap-2">
-                    <Input
-                      readOnly
-                      value={inviteResult.invite_url}
-                      className="font-mono text-xs"
-                      onFocus={(e) => e.target.select()}
-                    />
-                    <CopyButton text={inviteResult.invite_url} />
-                  </div>
-                </div>
+              <div className="flex items-center gap-2">
+                <Input readOnly value={inviteResult.url} className="font-mono text-xs" />
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="shrink-0"
+                  onClick={() => void copyUrl(inviteResult.url)}
+                >
+                  {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                </Button>
               </div>
-
               <DialogFooter>
-                <Button onClick={closeInviteDialog}>Done</Button>
+                <Button onClick={() => setCreateOpen(false)}>{t('users.done')}</Button>
               </DialogFooter>
             </>
           ) : (
             <>
               <DialogHeader>
-                <DialogTitle>Invite a user</DialogTitle>
+                <DialogTitle>{t('users.createTitle')}</DialogTitle>
                 <DialogDescription>
-                  They'll receive an invite link to set their password and join.
+                  {inviteMode ? t('users.inviteHint') : t('users.createHint')}
                 </DialogDescription>
               </DialogHeader>
 
-              <div className="space-y-4 py-2">
-                <div className="space-y-1.5">
-                  <Label htmlFor="invite-email">Email address</Label>
+              <Tabs
+                value={inviteMode ? 'invite' : 'password'}
+                onValueChange={(v) => setInviteMode(v === 'invite')}
+              >
+                <TabsList className="grid w-full grid-cols-2">
+                  <TabsTrigger value="invite">{t('users.modeInvite')}</TabsTrigger>
+                  <TabsTrigger value="password">{t('users.modePassword')}</TabsTrigger>
+                </TabsList>
+              </Tabs>
+
+              {createError && (
+                <div className="rounded-md border border-destructive/50 bg-destructive/10 px-4 py-2 text-sm text-destructive">
+                  {createError}
+                </div>
+              )}
+
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="new-user-name">{t('users.firstName')}</Label>
+                    <Input
+                      id="new-user-name"
+                      value={form.name}
+                      onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="new-user-surname">{t('users.lastName')}</Label>
+                    <Input
+                      id="new-user-surname"
+                      value={form.surname}
+                      onChange={(e) => setForm((f) => ({ ...f, surname: e.target.value }))}
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="new-user-email">{t('users.email')}</Label>
                   <Input
-                    id="invite-email"
+                    id="new-user-email"
                     type="email"
-                    placeholder="colleague@example.com"
-                    value={inviteEmail}
-                    onChange={(e) => setInviteEmail(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') void submitInvite() }}
-                    disabled={inviting}
+                    autoComplete="off"
+                    value={form.email}
+                    onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
                   />
                 </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="invite-role">Role (optional)</Label>
-                  <Select value={inviteRoleId} onValueChange={setInviteRoleId} disabled={inviting}>
-                    <SelectTrigger id="invite-role">
-                      <SelectValue placeholder="Select a role…" />
+                {!inviteMode && (
+                  <div className="space-y-2">
+                    <Label htmlFor="new-user-password">{t('users.password')}</Label>
+                    <Input
+                      id="new-user-password"
+                      type="password"
+                      autoComplete="new-password"
+                      value={form.password}
+                      onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
+                    />
+                  </div>
+                )}
+                <div className="space-y-2">
+                  <Label>{t('users.role')}</Label>
+                  <Select
+                    value={form.roleId}
+                    onValueChange={(v) => setForm((f) => ({ ...f, roleId: v }))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder={t('users.assignRole')} />
                     </SelectTrigger>
                     <SelectContent>
                       {roles.map((r) => (
@@ -374,20 +517,20 @@ export default function UsersPage() {
                     </SelectContent>
                   </Select>
                 </div>
-                {inviteError && (
-                  <p className="text-sm text-destructive">{inviteError}</p>
-                )}
               </div>
 
               <DialogFooter>
-                <Button variant="outline" onClick={closeInviteDialog} disabled={inviting}>
-                  Cancel
+                <Button variant="outline" onClick={() => setCreateOpen(false)} disabled={creating}>
+                  {t('common.cancel')}
                 </Button>
-                <Button
-                  onClick={() => void submitInvite()}
-                  disabled={inviting || !inviteEmail.trim()}
-                >
-                  {inviting ? 'Sending…' : 'Send invite'}
+                <Button onClick={() => void onCreate()} disabled={creating || !formValid}>
+                  {creating
+                    ? inviteMode
+                      ? t('users.inviting')
+                      : t('common.saving')
+                    : inviteMode
+                      ? t('users.invite')
+                      : t('common.create')}
                 </Button>
               </DialogFooter>
             </>

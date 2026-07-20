@@ -33,10 +33,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     fetchMe()
       .then(setUser)
       .catch((err) => {
-        // Only sign out if the token is genuinely rejected (401). Transient
-        // failures — network errors or 5xx while the API restarts during a
-        // redeploy — must NOT drop the session; keep the stored user.
-        if (err instanceof ApiError && err.status === 401) {
+        // Only sign out if the token is genuinely rejected (401, or 403 when
+        // the account was deactivated). Transient failures — network errors or
+        // 5xx while the API restarts during a redeploy — must NOT drop the
+        // session; keep the stored user.
+        if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
           clearAuth()
           setUser(null)
         }
