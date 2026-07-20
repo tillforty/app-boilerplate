@@ -76,6 +76,13 @@ async def _find_or_create_user(email: str, name: str, surname: str) -> int:
     pool = db.get_pool()
     row = await pool.fetchrow("SELECT id FROM users WHERE email = $1", email)
     if row:
+        # SSO proves email ownership, which is what a pending invitation was
+        # waiting for — activate. (Inactive users stay inactive: admin decision.)
+        await pool.execute(
+            "UPDATE users SET status = 'active', invite_token = NULL "
+            "WHERE id = $1 AND status = 'pending'",
+            row["id"],
+        )
         return row["id"]
     # OAuth users authenticate via the provider — store a random, unusable hash.
     unusable = security.hash_password(secrets.token_urlsafe(32))
