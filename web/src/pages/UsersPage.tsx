@@ -13,6 +13,7 @@ import {
 } from '@/lib/auth'
 import { listRoles, assignRole, type Role } from '@/lib/roles'
 import { usePermissions } from '@/context/PermissionsContext'
+import { useDemo } from '@/context/DemoContext'
 import { useTranslation } from '@/i18n'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
@@ -65,8 +66,11 @@ function formatDate(iso: string): string {
 export default function UsersPage() {
   const { t } = useTranslation()
   const { can } = usePermissions()
+  const { enabled: demoMode } = useDemo()
   const canManage = can('users:update')
-  const canCreate = can('users:create')
+  // Demo mode is read-only: never expose user creation/invites, even if the
+  // demo account's role happens to grant the permission.
+  const canCreate = can('users:create') && !demoMode
   const canArchive = can('users:delete')
 
   const [users, setUsers] = useState<UserRow[]>([])
@@ -255,6 +259,12 @@ export default function UsersPage() {
           </Button>
         )}
       </div>
+
+      {demoMode && (
+        <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-400">
+          {t('demo.usersDisabled')}
+        </div>
+      )}
 
       {error && (
         <div className="rounded-md border border-destructive/50 bg-destructive/10 px-4 py-2 text-sm text-destructive">

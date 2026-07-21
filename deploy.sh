@@ -114,6 +114,25 @@ else
   [ -n "$GIT_TOKEN" ] && $SUDO git -C "$APP_DIR" remote set-url origin "$GIT_URL"
 fi
 
+# ── Install the on-server `deploy` command ───────────────────────────────────
+# So updating this box later is a single word — `deploy` — instead of re-running
+# the curl one-liner or needing a laptop checkout for `make deploy`. It does the
+# idempotent "git pull + rebuild", preserving the database volume and .env secrets.
+DEPLOY_BIN="/usr/local/bin/deploy"
+info "Installing '$DEPLOY_BIN' (run 'deploy' to update this box later)…"
+$SUDO tee "$DEPLOY_BIN" >/dev/null <<EOF
+#!/usr/bin/env bash
+# Update + redeploy the app on this server: git pull + rebuild.
+# Installed by deploy.sh. Preserves the Postgres volume and .env secrets.
+# If 'git pull' is blocked by local edits to tracked files, commit or discard
+# them first (e.g. 'git -C $APP_DIR checkout -- <file>').
+set -euo pipefail
+cd "$APP_DIR"
+git pull --ff-only
+exec ./start.sh "\$@"
+EOF
+$SUDO chmod +x "$DEPLOY_BIN"
+
 # ── Launch ───────────────────────────────────────────────────────────────────
 # start.sh creates .env + secrets on first run and, when DOMAIN is exported,
 # bakes it in and brings up the Caddy HTTPS proxy. On later runs .env is left

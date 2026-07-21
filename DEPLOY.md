@@ -69,6 +69,18 @@ docker compose logs caddy  # cert issuance specifically
 `deploy.sh` is **idempotent** — re-running it does `git pull` + rebuild and
 preserves the database, uploaded files, and secrets. Use it as your update path too.
 
+**Updating later — just run `deploy`.** The first `deploy.sh` installs a
+`/usr/local/bin/deploy` command on the server, so from then on updating the box is
+one word:
+
+```bash
+deploy            # on the server: git pull + rebuild, data + secrets preserved
+```
+
+That's the everyday update path (no laptop checkout or `make deploy` needed). It
+does a fast-forward `git pull`; if local edits to tracked files block it, commit
+or discard them first (e.g. `git -C /opt/app-boilerplate checkout -- <file>`).
+
 ### Private repositories
 
 If the source repo is **private**, two things need auth that a public repo doesn't:
