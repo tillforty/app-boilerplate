@@ -41,6 +41,12 @@ export interface AppConfig {
      * --primary CSS variable). Applied at runtime by applyBrandTheme().
      */
     primary: string
+    /**
+     * Text/icon color rendered ON TOP of the primary color (buttons, active nav,
+     * avatar) as HSL channels "H S% L%" (the --primary-foreground CSS variable).
+     * Must contrast with `primary` — e.g. a light value for a dark primary.
+     */
+    primaryForeground: string
   }
   /** Primary horizontal/vertical nav. */
   nav: NavItem[]
@@ -56,6 +62,7 @@ export const appConfig: AppConfig = {
     logoSrc: logoUrl,
     initial: 'S',
     primary: '0 0% 12.9%',
+    primaryForeground: '0 0% 98%',
   },
   nav: [
     { label: 'Dashboard', href: '/', icon: LayoutDashboard },
@@ -80,5 +87,10 @@ export function applyBrandTheme(config: AppConfig = appConfig): void {
   const root = document.documentElement
   for (const v of ['--primary', '--ring', '--sidebar-primary', '--sidebar-ring']) {
     root.style.setProperty(v, config.brand.primary)
+  }
+  // Keep the on-primary text/icon color in sync so it always contrasts with the
+  // (possibly dark) primary — otherwise buttons/active nav render same-on-same.
+  for (const v of ['--primary-foreground', '--sidebar-primary-foreground']) {
+    root.style.setProperty(v, config.brand.primaryForeground)
   }
 }
