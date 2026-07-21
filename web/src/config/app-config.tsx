@@ -13,6 +13,7 @@ import {
   Contact,
   Component,
   FolderOpen,
+  SlidersHorizontal,
   type LucideIcon,
 } from 'lucide-react'
 // Import the logo as a Vite asset so it gets a content-hashed URL
@@ -64,6 +65,7 @@ export const appConfig: AppConfig = {
     { label: 'Components', href: '/components', icon: Component },
   ],
   settingsNav: [
+    { label: 'App settings', href: '/settings/app', icon: SlidersHorizontal },
     { label: 'Users', href: '/settings/users', icon: Users },
     { label: 'Roles', href: '/settings/roles', icon: Shield },
     { label: 'API Docs', href: '/api/docs', icon: BookOpen, external: true },

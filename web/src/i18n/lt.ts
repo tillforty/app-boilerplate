@@ -168,4 +168,13 @@ export const lt: Dictionary = {
     logoNotImage: 'Logotipas turi būti paveikslėlio failas.',
     logoTooLarge: 'Logotipas turi būti ne didesnis nei 2 MB.',
   },
+  settings: {
+    title: 'Programos nustatymai',
+    subtitle: 'Prekės ženklas, lokalizacija ir el. paštas — pritaikoma visoje programoje realiu laiku.',
+    save: 'Išsaugoti pakeitimus',
+    saved: 'Nustatymai išsaugoti.',
+    loadFailed: 'Nepavyko įkelti nustatymų',
+    saveFailed: 'Nepavyko išsaugoti nustatymų',
+    noPermission: 'Neturite teisės redaguoti programos nustatymų.',
+  },
 }

@@ -115,6 +115,21 @@ class PublicSettings(BaseModel):
     demo_enabled: bool
 
 
+class AdminSettings(BaseModel):
+    """Full editable settings for the admin settings page (no logo bytes)."""
+    app_name: str
+    default_language: str
+    currency_code: str
+    currency_symbol: str
+    timezone: str
+    demo_mode: bool
+    from_name: str
+    from_email: str
+    support_email: str
+    has_logo: bool
+    logo_url: str | None
+
+
 class SettingsUpdate(BaseModel):
     app_name: str | None = None
     default_language: str | None = None
@@ -191,6 +206,48 @@ async def get_logo() -> Response:
         media_type=row["logo_mime"] or "image/png",
         headers={"Cache-Control": "public, max-age=3600"},
     )
+
+
+@router.get("/admin", response_model=AdminSettings)
+async def get_admin_settings(
+    _: UserOut = Depends(require_permission("roles:manage")),
+) -> AdminSettings:
+    """Full settings (incl. the email identity) for the admin edit page."""
+    row = await db.get_pool().fetchrow("SELECT * FROM app_settings WHERE id = 1")
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Settings not initialized")
+    return AdminSettings(
+        app_name=row["app_name"],
+        default_language=row["default_language"],
+        currency_code=row["currency_code"],
+        currency_symbol=row["currency_symbol"],
+        timezone=row["timezone"],
+        demo_mode=bool(row["demo_mode"]),
+        from_name=row["from_name"],
+        from_email=row["from_email"],
+        support_email=row["support_email"],
+        has_logo=row["logo"] is not None,
+        logo_url="/api/settings/logo" if row["logo"] is not None else None,
+    )
+
+
+@router.post("/logo", status_code=status.HTTP_204_NO_CONTENT)
+async def set_logo(
+    logo: UploadFile = File(...),
+    _: UserOut = Depends(require_permission("roles:manage")),
+) -> Response:
+    """Replace the logo after onboarding."""
+    data = await logo.read()
+    mime = logo.content_type or "application/octet-stream"
+    if not mime.startswith("image/"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Logo must be an image")
+    if len(data) > LOGO_MAX_BYTES:
+        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "Logo exceeds the 2 MiB limit")
+    await db.get_pool().execute(
+        "UPDATE app_settings SET logo = $1, logo_mime = $2, updated_at = now() WHERE id = 1",
+        data, mime,
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post("/onboard", status_code=status.HTTP_204_NO_CONTENT)

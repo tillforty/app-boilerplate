@@ -1,5 +1,5 @@
 import { useMemo, useState, type FormEvent } from 'react'
-import { submitOnboarding } from '@/lib/settings'
+import { submitOnboarding, CURRENCY_PRESETS, COMMON_TIMEZONES } from '@/lib/settings'
 import { ApiError } from '@/lib/api'
 import { LANGUAGE_LABELS, useTranslation, type Language } from '@/i18n'
 import { Button } from '@/components/ui/button'
@@ -14,28 +14,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-
-const CURRENCIES: { code: string; symbol: string }[] = [
-  { code: 'EUR', symbol: '€' },
-  { code: 'USD', symbol: '$' },
-  { code: 'GBP', symbol: '£' },
-  { code: 'PLN', symbol: 'zł' },
-  { code: 'SEK', symbol: 'kr' },
-]
-
-const TIMEZONES = [
-  'Europe/Vilnius',
-  'Europe/Riga',
-  'Europe/Tallinn',
-  'Europe/Warsaw',
-  'Europe/Helsinki',
-  'Europe/London',
-  'Europe/Berlin',
-  'UTC',
-  'America/New_York',
-  'America/Los_Angeles',
-  'Asia/Tokyo',
-]
 
 const LOGO_MAX_BYTES = 2 * 1024 * 1024
 
@@ -72,7 +50,7 @@ export default function OnboardingPage() {
 
   function onCurrency(code: string) {
     setCurrencyCode(code)
-    const match = CURRENCIES.find((c) => c.code === code)
+    const match = CURRENCY_PRESETS.find((c) => c.code === code)
     if (match) setCurrencySymbol(match.symbol)
   }
 
@@ -188,7 +166,7 @@ export default function OnboardingPage() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {CURRENCIES.map((c) => (
+                      {CURRENCY_PRESETS.map((c) => (
                         <SelectItem key={c.code} value={c.code}>
                           {c.code} ({c.symbol})
                         </SelectItem>
@@ -212,7 +190,7 @@ export default function OnboardingPage() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {TIMEZONES.map((tz) => (
+                    {COMMON_TIMEZONES.map((tz) => (
                       <SelectItem key={tz} value={tz}>
                         {tz}
                       </SelectItem>

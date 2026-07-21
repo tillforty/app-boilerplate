@@ -10,6 +10,7 @@ import CustomersPage from '@/pages/CustomersPage'
 import ComponentsPage from '@/pages/ComponentsPage'
 import UsersPage from '@/pages/UsersPage'
 import RolesPage from '@/pages/RolesPage'
+import SettingsPage from '@/pages/SettingsPage'
 import ProfilePage from '@/pages/ProfilePage'
 import DocumentsPage from '@/pages/DocumentsPage'
 import InvitePage from '@/pages/InvitePage'
@@ -63,6 +64,7 @@ export default function App() {
           <Route path="/profile" element={<ProfilePage />} />
           <Route path="/settings/users" element={<UsersPage />} />
           <Route path="/settings/roles" element={<RolesPage />} />
+          <Route path="/settings/app" element={<SettingsPage />} />
         </Route>
       </Route>
     </Routes>

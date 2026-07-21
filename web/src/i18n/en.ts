@@ -58,6 +58,10 @@ export interface Dictionary {
     | 'submit' | 'submitting' | 'failed' | 'logoNotImage' | 'logoTooLarge',
     string
   >
+  settings: Record<
+    | 'title' | 'subtitle' | 'save' | 'saved' | 'loadFailed' | 'saveFailed' | 'noPermission',
+    string
+  >
 }
 
 export const en: Dictionary = {
@@ -223,5 +227,14 @@ export const en: Dictionary = {
     failed: 'Setup failed',
     logoNotImage: 'The logo must be an image file.',
     logoTooLarge: 'The logo must be 2 MB or smaller.',
+  },
+  settings: {
+    title: 'App settings',
+    subtitle: 'Branding, localization and email — applied across the app in real time.',
+    save: 'Save changes',
+    saved: 'Settings saved.',
+    loadFailed: 'Failed to load settings',
+    saveFailed: 'Failed to save settings',
+    noPermission: 'You don’t have permission to edit app settings.',
   },
 }

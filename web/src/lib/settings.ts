@@ -1,6 +1,30 @@
 import { api } from './api'
 import type { Language } from '@/i18n'
 
+/** Currency presets offered in the onboarding + settings forms. */
+export const CURRENCY_PRESETS: { code: string; symbol: string }[] = [
+  { code: 'EUR', symbol: '€' },
+  { code: 'USD', symbol: '$' },
+  { code: 'GBP', symbol: '£' },
+  { code: 'PLN', symbol: 'zł' },
+  { code: 'SEK', symbol: 'kr' },
+]
+
+/** Common IANA timezones offered in the pickers (default first). */
+export const COMMON_TIMEZONES = [
+  'Europe/Vilnius',
+  'Europe/Riga',
+  'Europe/Tallinn',
+  'Europe/Warsaw',
+  'Europe/Helsinki',
+  'Europe/London',
+  'Europe/Berlin',
+  'UTC',
+  'America/New_York',
+  'America/Los_Angeles',
+  'Asia/Tokyo',
+]
+
 /** Public runtime settings the SPA bootstraps with (no secrets, no logo bytes). */
 export interface PublicSettings {
   onboarded: boolean
@@ -51,6 +75,29 @@ export async function submitOnboarding(p: OnboardPayload): Promise<void> {
   fd.append('admin_password', p.admin_password)
   if (p.logo) fd.append('logo', p.logo)
   await api.upload<void>('/settings/onboard', fd)
+}
+
+/** Full editable settings for the admin edit page (auth required). */
+export interface AdminSettings {
+  app_name: string
+  default_language: Language
+  currency_code: string
+  currency_symbol: string
+  timezone: string
+  demo_mode: boolean
+  from_name: string
+  from_email: string
+  support_email: string
+  has_logo: boolean
+  logo_url: string | null
+}
+
+export const getAdminSettings = () => api.get<AdminSettings>('/settings/admin')
+
+export async function uploadLogo(file: File): Promise<void> {
+  const fd = new FormData()
+  fd.append('logo', file)
+  await api.upload<void>('/settings/logo', fd)
 }
 
 export interface SettingsPatch {
