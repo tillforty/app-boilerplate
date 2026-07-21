@@ -1,6 +1,7 @@
 import { useMemo, useState, type FormEvent } from 'react'
 import { submitOnboarding, CURRENCY_PRESETS, COMMON_TIMEZONES } from '@/lib/settings'
 import { ApiError } from '@/lib/api'
+import { useAppSettings } from '@/context/AppSettingsContext'
 import { LANGUAGE_LABELS, useTranslation, type Language } from '@/i18n'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -19,16 +20,19 @@ const LOGO_MAX_BYTES = 2 * 1024 * 1024
 
 export default function OnboardingPage() {
   const { t } = useTranslation()
+  const { settings } = useAppSettings()
 
+  // The gate only renders this page once settings have loaded, so the sender
+  // defaults (env SMTP_FROM_*) are available to seed the fields on first render.
   const [appName, setAppName] = useState('')
   const [language, setLanguage] = useState<Language>('en')
   const [currencyCode, setCurrencyCode] = useState('EUR')
   const [currencySymbol, setCurrencySymbol] = useState('€')
   const [timezone, setTimezone] = useState('Europe/Vilnius')
   const [demoMode, setDemoMode] = useState(false)
-  const [fromName, setFromName] = useState('')
-  const [fromEmail, setFromEmail] = useState('')
-  const [supportEmail, setSupportEmail] = useState('')
+  const [fromName, setFromName] = useState(settings?.default_from_name ?? '')
+  const [fromEmail, setFromEmail] = useState(settings?.default_from_email ?? '')
+  const [supportEmail, setSupportEmail] = useState(settings?.default_support_email ?? '')
   const [adminName, setAdminName] = useState('')
   const [adminSurname, setAdminSurname] = useState('')
   const [adminEmail, setAdminEmail] = useState('')

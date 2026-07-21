@@ -103,7 +103,12 @@ def _refresh_cache(row) -> None:
 
 
 class PublicSettings(BaseModel):
-    """Bootstrap payload for the SPA — no secrets, no logo bytes."""
+    """Bootstrap payload for the SPA — no secrets, no logo bytes.
+
+    The `default_*` sender fields are populated ONLY before onboarding (so the
+    public wizard can prefill them from the env SMTP_FROM_* values); once
+    onboarded they are null, so the configured emails aren't exposed publicly.
+    """
     onboarded: bool
     app_name: str
     has_logo: bool
@@ -113,6 +118,9 @@ class PublicSettings(BaseModel):
     currency_symbol: str
     timezone: str
     demo_enabled: bool
+    default_from_name: str | None = None
+    default_from_email: str | None = None
+    default_support_email: str | None = None
 
 
 class AdminSettings(BaseModel):
@@ -157,6 +165,12 @@ async def _apply_db_timezone(conn, tz: str) -> None:
 
 
 def _to_public(row) -> PublicSettings:
+    # Prefill defaults for the onboarding wizard only; hide them once onboarded.
+    d_from_name = d_from_email = d_support = None
+    if not row["onboarded"]:
+        d_from_name = row["from_name"] or mailer.SMTP_FROM_NAME
+        d_from_email = row["from_email"] or mailer.SMTP_FROM_EMAIL
+        d_support = row["support_email"] or d_from_email
     return PublicSettings(
         onboarded=row["onboarded"],
         app_name=row["app_name"],
@@ -167,6 +181,9 @@ def _to_public(row) -> PublicSettings:
         currency_symbol=row["currency_symbol"],
         timezone=row["timezone"],
         demo_enabled=bool(row["demo_mode"]),
+        default_from_name=d_from_name,
+        default_from_email=d_from_email,
+        default_support_email=d_support,
     )
 
 

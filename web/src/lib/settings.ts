@@ -36,6 +36,10 @@ export interface PublicSettings {
   currency_symbol: string
   timezone: string
   demo_enabled: boolean
+  /** Sender prefill defaults — present only before onboarding. */
+  default_from_name?: string | null
+  default_from_email?: string | null
+  default_support_email?: string | null
 }
 
 export const getSettings = () => api.get<PublicSettings>('/settings')
