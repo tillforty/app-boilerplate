@@ -29,7 +29,7 @@ from fastapi import (
 )
 from pydantic import BaseModel
 
-from . import db, security
+from . import db, mailer, security
 from .auth import UserOut
 from .roles import ADMIN_ROLE, require_permission
 
@@ -216,6 +216,11 @@ async def get_admin_settings(
     row = await db.get_pool().fetchrow("SELECT * FROM app_settings WHERE id = 1")
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Settings not initialized")
+    # Fall back to the effective sender defaults (what the mailer actually uses,
+    # from SMTP_FROM_* env) so the edit form shows real values instead of blanks.
+    from_name = row["from_name"] or mailer.SMTP_FROM_NAME
+    from_email = row["from_email"] or mailer.SMTP_FROM_EMAIL
+    support_email = row["support_email"] or from_email
     return AdminSettings(
         app_name=row["app_name"],
         default_language=row["default_language"],
@@ -223,9 +228,9 @@ async def get_admin_settings(
         currency_symbol=row["currency_symbol"],
         timezone=row["timezone"],
         demo_mode=bool(row["demo_mode"]),
-        from_name=row["from_name"],
-        from_email=row["from_email"],
-        support_email=row["support_email"],
+        from_name=from_name,
+        from_email=from_email,
+        support_email=support_email,
         has_logo=row["logo"] is not None,
         logo_url="/api/settings/logo" if row["logo"] is not None else None,
     )
