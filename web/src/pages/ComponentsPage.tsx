@@ -21,7 +21,7 @@ export default function ComponentsPage() {
   const [agree, setAgree] = useState(true)
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
+    <div className="mx-auto max-w-content space-y-6">
       <div>
         <h1 className="text-2xl font-semibold">Components</h1>
         <p className="text-sm text-muted-foreground">
