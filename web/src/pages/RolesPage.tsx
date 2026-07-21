@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react'
-import { Plus, Pencil, Trash2, Lock, ShieldCheck } from 'lucide-react'
+import { Plus, Lock, ShieldCheck, MoreHorizontal } from 'lucide-react'
 import {
   listRoles,
   getPermissionCatalog,
   createRole,
   updateRole,
   deleteRole,
+  deactivateRole,
+  activateRole,
   permKey,
   WILDCARD,
   type Role,
@@ -19,12 +21,20 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Checkbox } from '@/components/ui/checkbox'
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card'
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import {
   Dialog,
   DialogContent,
@@ -134,9 +144,31 @@ export default function RolesPage() {
     }
   }
 
+  async function onDeactivate(role: Role) {
+    if (!window.confirm(t('roles.deactivateConfirm', { name: role.name }))) return
+    setError(null)
+    try {
+      const updated = await deactivateRole(role.id)
+      setRoles((prev) => prev.map((r) => (r.id === role.id ? updated : r)))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : t('roles.actionFailed'))
+    }
+  }
+
+  async function onActivate(role: Role) {
+    setError(null)
+    try {
+      const updated = await activateRole(role.id)
+      setRoles((prev) => prev.map((r) => (r.id === role.id ? updated : r)))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : t('roles.actionFailed'))
+    }
+  }
+
   const isAdminRole = edit?.role?.name === ADMIN
   const permsLocked = isAdminRole // administrator is always full-access
   const nameLocked = !!edit?.role?.is_system // system roles can't be renamed
+  const colSpan = 4 + (canManage ? 1 : 0) // Name, Description, Permissions, Status (+ kebab)
 
   return (
     <div className="mx-auto max-w-content space-y-6">
@@ -159,17 +191,36 @@ export default function RolesPage() {
         </div>
       )}
 
-      {loading ? (
-        <p className="text-sm text-muted-foreground">{t('common.loading')}</p>
-      ) : (
-        <div className="grid gap-4 sm:grid-cols-2">
-          {roles.map((role) => (
-            <Card key={role.id}>
-              <CardHeader>
-                <div className="flex items-start justify-between gap-2">
-                  <div className="space-y-1">
-                    <CardTitle className="flex items-center gap-2">
-                      {role.name === ADMIN && <ShieldCheck className="h-4 w-4 text-primary" />}
+      <div className="rounded-lg border">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>{t('roles.name')}</TableHead>
+              <TableHead>{t('roles.description')}</TableHead>
+              <TableHead>{t('roles.permissions')}</TableHead>
+              <TableHead>{t('roles.status')}</TableHead>
+              {canManage && <TableHead className="w-10" />}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {loading ? (
+              <TableRow>
+                <TableCell colSpan={colSpan} className="h-24 text-center text-muted-foreground">
+                  {t('common.loading')}
+                </TableCell>
+              </TableRow>
+            ) : roles.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={colSpan} className="h-24 text-center text-muted-foreground">
+                  {t('roles.empty')}
+                </TableCell>
+              </TableRow>
+            ) : (
+              roles.map((role) => (
+                <TableRow key={role.id} className={role.is_active ? undefined : 'opacity-60'}>
+                  <TableCell>
+                    <div className="flex items-center gap-2 font-medium">
+                      {role.name === ADMIN && <ShieldCheck className="h-4 w-4 shrink-0 text-primary" />}
                       {role.name}
                       {role.is_system && (
                         <Badge variant="secondary" className="gap-1">
@@ -177,46 +228,75 @@ export default function RolesPage() {
                           {t('roles.system')}
                         </Badge>
                       )}
-                    </CardTitle>
-                    <CardDescription>{role.description || t('common.none')}</CardDescription>
-                  </div>
-                  {canManage && (
-                    <div className="flex shrink-0 gap-1">
-                      <Button variant="ghost" size="icon" onClick={() => startEdit(role)}>
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        disabled={role.is_system}
-                        title={role.is_system ? t('roles.system') : t('common.delete')}
-                        onClick={() => remove(role)}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
                     </div>
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {role.description || t('common.none')}
+                  </TableCell>
+                  <TableCell>
+                    {role.permissions.includes(WILDCARD) ? (
+                      <Badge>{t('roles.fullAccess')}</Badge>
+                    ) : role.permissions.length ? (
+                      <div className="flex flex-wrap gap-1">
+                        {role.permissions.map((p) => (
+                          <Badge key={p} variant="outline">
+                            {p}
+                          </Badge>
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="text-sm text-muted-foreground">{t('roles.noPermissions')}</span>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant={role.is_active ? 'secondary' : 'outline'}>
+                      {role.is_active ? t('roles.active') : t('roles.inactive')}
+                    </Badge>
+                  </TableCell>
+                  {canManage && (
+                    <TableCell>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon" className="h-8 w-8">
+                            <MoreHorizontal className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => startEdit(role)}>
+                            {t('roles.edit')}
+                          </DropdownMenuItem>
+                          {role.is_active
+                            ? !role.is_system && (
+                                <DropdownMenuItem onClick={() => void onDeactivate(role)}>
+                                  {t('roles.deactivate')}
+                                </DropdownMenuItem>
+                              )
+                            : (
+                                <DropdownMenuItem onClick={() => void onActivate(role)}>
+                                  {t('roles.activate')}
+                                </DropdownMenuItem>
+                              )}
+                          {!role.is_system && (
+                            <>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                className="text-destructive focus:text-destructive"
+                                onClick={() => void remove(role)}
+                              >
+                                {t('common.delete')}
+                              </DropdownMenuItem>
+                            </>
+                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </TableCell>
                   )}
-                </div>
-              </CardHeader>
-              <CardContent>
-                {role.permissions.includes(WILDCARD) ? (
-                  <Badge>{t('roles.fullAccess')}</Badge>
-                ) : role.permissions.length ? (
-                  <div className="flex flex-wrap gap-1">
-                    {role.permissions.map((p) => (
-                      <Badge key={p} variant="outline">
-                        {p}
-                      </Badge>
-                    ))}
-                  </div>
-                ) : (
-                  <span className="text-sm text-muted-foreground">{t('roles.noPermissions')}</span>
-                )}
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </div>
 
       <Dialog open={!!edit} onOpenChange={(o) => !o && setEdit(null)}>
         <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">

@@ -227,6 +227,10 @@ export default function UsersPage() {
     }
   }
 
+  // Only active roles are offered for assignment; deactivated ones are kept for
+  // audit but shouldn't land on new users. A user's current role still shows in
+  // the Role column regardless of the role's active state.
+  const activeRoles = roles.filter((r) => r.is_active)
   const visible = users.filter((u) => u.status === tab)
   const counts = {
     active: users.filter((u) => u.status === 'active').length,
@@ -362,7 +366,7 @@ export default function UsersPage() {
                           <SelectValue placeholder={t('users.assignRole')} />
                         </SelectTrigger>
                         <SelectContent>
-                          {roles.map((r) => (
+                          {activeRoles.map((r) => (
                             <SelectItem key={r.id} value={r.id.toString()}>
                               {r.name}
                             </SelectItem>
@@ -519,7 +523,7 @@ export default function UsersPage() {
                       <SelectValue placeholder={t('users.assignRole')} />
                     </SelectTrigger>
                     <SelectContent>
-                      {roles.map((r) => (
+                      {activeRoles.map((r) => (
                         <SelectItem key={r.id} value={r.id.toString()}>
                           {r.name}
                         </SelectItem>

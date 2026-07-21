@@ -59,6 +59,11 @@ async def ensure_schema_and_seed() -> None:
     """
     async with db.get_pool().acquire() as conn:
         await conn.execute(CREATE_SCHEMA)
+        # Lifecycle column (canonical DDL in migrations/0009_role_lifecycle.sql);
+        # added here too so a fresh code deploy works even before migrations run.
+        await conn.execute(
+            "ALTER TABLE roles ADD COLUMN IF NOT EXISTS is_active boolean NOT NULL DEFAULT true"
+        )
         # Administrator is always locked to ['*'].
         await conn.execute(
             """
@@ -91,6 +96,7 @@ class Role(BaseModel):
     description: str
     permissions: list[str]
     is_system: bool
+    is_active: bool
     created_at: datetime
 
 
@@ -172,7 +178,7 @@ async def my_role(user: UserOut = Depends(get_current_user)) -> dict:
 @router.get("", response_model=list[Role])
 async def list_roles(_: UserOut = Depends(get_current_user)) -> list[Role]:
     rows = await db.get_pool().fetch(
-        "SELECT id, name, description, permissions, is_system, created_at FROM roles ORDER BY id"
+        "SELECT id, name, description, permissions, is_system, is_active, created_at FROM roles ORDER BY id"
     )
     return [Role(**dict(r)) for r in rows]
 
@@ -185,7 +191,7 @@ async def create_role(
     try:
         row = await db.get_pool().fetchrow(
             "INSERT INTO roles (name, description, permissions) VALUES ($1, $2, $3) "
-            "RETURNING id, name, description, permissions, is_system, created_at",
+            "RETURNING id, name, description, permissions, is_system, is_active, created_at",
             body.name,
             body.description,
             perms,
@@ -198,7 +204,7 @@ async def create_role(
 @router.get("/{role_id}", response_model=Role)
 async def get_role(role_id: int, _: UserOut = Depends(get_current_user)) -> Role:
     row = await db.get_pool().fetchrow(
-        "SELECT id, name, description, permissions, is_system, created_at FROM roles WHERE id = $1",
+        "SELECT id, name, description, permissions, is_system, is_active, created_at FROM roles WHERE id = $1",
         role_id,
     )
     if row is None:
@@ -238,7 +244,7 @@ async def update_role(
     try:
         updated = await db.get_pool().fetchrow(
             f"UPDATE roles SET {sets} WHERE id = $1 "
-            "RETURNING id, name, description, permissions, is_system, created_at",
+            "RETURNING id, name, description, permissions, is_system, is_active, created_at",
             role_id,
             *fields.values(),
         )
@@ -266,6 +272,39 @@ async def delete_role(
             status.HTTP_409_CONFLICT, f"Role is assigned to {in_use} user(s); reassign them first"
         )
     await db.get_pool().execute("DELETE FROM roles WHERE id = $1", role_id)
+
+
+async def _set_active(role_id: int, active: bool) -> Role:
+    """Flip a role's active flag. Soft — keeps the role and all its data."""
+    row = await db.get_pool().fetchrow(
+        "SELECT name, is_system FROM roles WHERE id = $1", role_id
+    )
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Role not found")
+    # System roles (administrator, member) must stay available.
+    if row["is_system"] and not active:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "System roles cannot be deactivated")
+    updated = await db.get_pool().fetchrow(
+        "UPDATE roles SET is_active = $2 WHERE id = $1 "
+        "RETURNING id, name, description, permissions, is_system, is_active, created_at",
+        role_id,
+        active,
+    )
+    return Role(**dict(updated))
+
+
+@router.post("/{role_id}/deactivate", response_model=Role)
+async def deactivate_role(
+    role_id: int, _: UserOut = Depends(require_permission("roles:manage"))
+) -> Role:
+    return await _set_active(role_id, False)
+
+
+@router.post("/{role_id}/activate", response_model=Role)
+async def activate_role(
+    role_id: int, _: UserOut = Depends(require_permission("roles:manage"))
+) -> Role:
+    return await _set_active(role_id, True)
 
 
 @router.put("/assign", status_code=status.HTTP_204_NO_CONTENT)

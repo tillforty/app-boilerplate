@@ -64,6 +64,16 @@ export const lt: Dictionary = {
     loadFailed: 'Nepavyko įkelti rolių',
     saveFailed: 'Nepavyko išsaugoti rolės',
     deleteFailed: 'Nepavyko ištrinti rolės',
+    edit: 'Redaguoti',
+    status: 'Būsena',
+    active: 'Aktyvi',
+    inactive: 'Neaktyvi',
+    deactivate: 'Deaktyvuoti',
+    activate: 'Aktyvuoti',
+    deactivateConfirm:
+      'Deaktyvuoti rolę „{name}“? Ją turintys naudotojai ją išlaiko, bet ji nebebus siūloma naujiems priskyrimams.',
+    actionFailed: 'Veiksmas nepavyko',
+    empty: 'Rolių dar nėra.',
   },
   users: {
     colUser: 'Vartotojas',

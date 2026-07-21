@@ -27,7 +27,9 @@ export interface Dictionary {
   roles: Record<
     | 'title' | 'subtitle' | 'newRole' | 'editRole' | 'system' | 'fullAccess' | 'noPermissions'
     | 'permissions' | 'name' | 'description' | 'namePlaceholder' | 'descPlaceholder' | 'dialogHint'
-    | 'adminLocked' | 'deleteConfirm' | 'loadFailed' | 'saveFailed' | 'deleteFailed',
+    | 'adminLocked' | 'deleteConfirm' | 'loadFailed' | 'saveFailed' | 'deleteFailed'
+    | 'edit' | 'status' | 'active' | 'inactive' | 'deactivate' | 'activate'
+    | 'deactivateConfirm' | 'actionFailed' | 'empty',
     string
   >
   users: Record<
@@ -111,6 +113,16 @@ export const en: Dictionary = {
     loadFailed: 'Failed to load roles',
     saveFailed: 'Failed to save role',
     deleteFailed: 'Failed to delete role',
+    edit: 'Edit',
+    status: 'Status',
+    active: 'Active',
+    inactive: 'Inactive',
+    deactivate: 'Deactivate',
+    activate: 'Activate',
+    deactivateConfirm:
+      'Deactivate role "{name}"? Users who have it keep it, but it won\'t be offered for new assignments.',
+    actionFailed: 'Action failed',
+    empty: 'No roles yet.',
   },
   users: {
     colUser: 'User',

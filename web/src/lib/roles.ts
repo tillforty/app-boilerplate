@@ -8,6 +8,7 @@ export interface Role {
   description: string
   permissions: string[]
   is_system: boolean
+  is_active: boolean
   created_at: string
 }
 
@@ -52,5 +53,7 @@ export const createRole = (body: RoleInput) => api.post<Role>('/roles', body)
 export const updateRole = (id: number, patch: Partial<RoleInput>) =>
   api.patch<Role>(`/roles/${id}`, patch)
 export const deleteRole = (id: number) => api.delete<void>(`/roles/${id}`)
+export const deactivateRole = (id: number) => api.post<Role>(`/roles/${id}/deactivate`, {})
+export const activateRole = (id: number) => api.post<Role>(`/roles/${id}/activate`, {})
 export const assignRole = (user_id: number, role_id: number) =>
   api.put<void>('/roles/assign', { user_id, role_id })
