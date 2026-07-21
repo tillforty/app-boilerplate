@@ -122,6 +122,12 @@ export const lt: Dictionary = {
     expired: 'Šis pakvietimas nebegalioja — paprašykite administratoriaus naujo.',
     failed: 'Nepavyko priimti pakvietimo. Bandykite dar kartą.',
   },
+  demo: {
+    readOnly:
+      'Šis projektas veikia demonstraciniu režimu — demonstracinė paskyra skirta tik peržiūrai, todėl šie duomenys nepasiekiami. Norėdami juos matyti, prisijunkite pilna paskyra.',
+    usersDisabled:
+      'Įjungtas demonstracinis režimas — vartotojų kūrimas ir kvietimas demonstracinei paskyrai išjungtas.',
+  },
   language: {
     label: 'Kalba',
   },

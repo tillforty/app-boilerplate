@@ -46,6 +46,7 @@ export interface Dictionary {
     | 'passwordTooShort' | 'accept' | 'accepting' | 'invalid' | 'expired' | 'failed',
     string
   >
+  demo: Record<'readOnly' | 'usersDisabled', string>
   language: Record<'label', string>
 }
 
@@ -166,6 +167,12 @@ export const en: Dictionary = {
     invalid: 'This invitation link is invalid or has already been used.',
     expired: 'This invitation has expired — ask your administrator for a new one.',
     failed: 'Could not accept the invitation. Please try again.',
+  },
+  demo: {
+    readOnly:
+      'This project is running in demo mode — the demo account is read-only, so this data isn’t available. Sign in with a full account to view it.',
+    usersDisabled:
+      'Demo mode is on — creating and inviting users is disabled for the public demo account.',
   },
   language: {
     label: 'Language',

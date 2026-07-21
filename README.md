@@ -8,6 +8,32 @@ A full-stack starter shared across Tillforty apps:
 
 ---
 
+## 📋 Start here: build a plan first
+
+**Whoever drives this repo (a human or Claude): before running a single command,
+build a written plan of every action you're about to take, then work through it.**
+Setup and deploys here are *many small steps* — DNS and firewall checks, repo
+access + tokens, Docker install, secret generation, migrations, TLS issuance,
+per-project `.env` and branding, email/DNS verification. Doing them ad hoc is how
+steps get skipped or half-done.
+
+So the expected flow is:
+
+1. **Collect all inputs up front** — domain, admin email, repo URLs + GitHub
+   token, email/Resend key, and any other `.env` values — in one pass, before
+   acting (don't guess defaults for these).
+2. **Write the plan** — enumerate every action from those inputs through to a
+   verified live site, in order, and surface it before executing.
+3. **Then execute**, checking each step off and reporting what actually happened
+   (including anything skipped or failed) — never report a step done until it's
+   verified.
+
+The "zero-question" prompt below still applies for a hands-off deploy — it just
+folds the plan into a single unattended run. For anything beyond a vanilla
+deploy (new project, custom branding, non-default email), plan first.
+
+---
+
 ## 🤖 Launch the whole stack with Claude (zero-question prompt)
 
 On a **fresh Ubuntu server**, install [Claude Code](https://claude.com/claude-code),

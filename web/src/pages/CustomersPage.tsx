@@ -14,6 +14,7 @@ import {
 } from '@/lib/customers'
 import { ApiError } from '@/lib/api'
 import { PermissionGate } from '@/components/PermissionGate'
+import { DataLoadError } from '@/components/DataLoadError'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -67,7 +68,7 @@ const blankForm = (): CustomerInput => ({
 
 export default function CustomersPage() {
   const [rows, setRows] = useState<Customer[] | null>(null)
-  const [loadError, setLoadError] = useState<string | null>(null)
+  const [loadError, setLoadError] = useState<unknown>(null)
   const [query, setQuery] = useState('')
   const [tab, setTab] = useState<'all' | CustomerStatus>('all')
 
@@ -88,7 +89,7 @@ export default function CustomersPage() {
       .then((data) => active && setRows(data))
       .catch((e) => {
         if (!active) return
-        setLoadError(e instanceof ApiError ? e.message : 'Failed to load customers')
+        setLoadError(e)
         setRows([])
       })
     return () => {
@@ -195,11 +196,7 @@ export default function CustomersPage() {
         </PermissionGate>
       </div>
 
-      {loadError && (
-        <div className="rounded-md border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-          {loadError}
-        </div>
-      )}
+      <DataLoadError error={loadError} />
 
       {/* Summary stats */}
       <div className="grid gap-4 sm:grid-cols-3">
