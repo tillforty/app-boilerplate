@@ -374,6 +374,11 @@ async def onboard(
         row = await conn.fetchrow("SELECT * FROM app_settings WHERE id = 1")
         _refresh_cache(row)
 
+    # Reconcile the demo user with the chosen toggle (seed if on, deactivate if
+    # off) — a demo admin may have been seeded from env before onboarding.
+    from . import demo
+    await demo.ensure_demo_user()
+
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -402,8 +407,8 @@ async def update_settings(
         row = await conn.fetchrow("SELECT * FROM app_settings WHERE id = 1")
         _refresh_cache(row)
 
-    # A live demo-mode flip to ON seeds the demo user immediately.
-    if body.demo_mode:
+    # A live demo-mode change reconciles the demo user (seed on / deactivate off).
+    if body.demo_mode is not None:
         from . import demo
         await demo.ensure_demo_user()
 

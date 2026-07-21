@@ -283,11 +283,15 @@ export default function OnboardingPage() {
                   onChange={(e) => setSupportEmail(e.target.value)}
                 />
               </div>
+            </section>
+
+            {/* Demo mode */}
+            <section className="space-y-4">
+              <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                {t('onboarding.sectionDemo')}
+              </h3>
               <label className="flex items-center gap-2 text-sm">
-                <Checkbox
-                  checked={demoMode}
-                  onCheckedChange={(c) => setDemoMode(c === true)}
-                />
+                <Checkbox checked={demoMode} onCheckedChange={(c) => setDemoMode(c === true)} />
                 {t('onboarding.demoMode')}
               </label>
             </section>

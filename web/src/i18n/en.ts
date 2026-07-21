@@ -51,7 +51,7 @@ export interface Dictionary {
   demo: Record<'readOnly' | 'usersDisabled', string>
   language: Record<'label', string>
   onboarding: Record<
-    | 'title' | 'subtitle' | 'sectionApp' | 'sectionAdmin' | 'sectionEmail'
+    | 'title' | 'subtitle' | 'sectionApp' | 'sectionAdmin' | 'sectionEmail' | 'sectionDemo'
     | 'appName' | 'logo' | 'language' | 'currency' | 'currencySymbol' | 'timezone'
     | 'adminName' | 'adminSurname' | 'adminEmail' | 'adminPassword' | 'passwordHint'
     | 'fromName' | 'fromEmail' | 'supportEmail' | 'demoMode'
@@ -206,7 +206,8 @@ export const en: Dictionary = {
     subtitle: 'These details configure this instance. You can change them later in settings.',
     sectionApp: 'App',
     sectionAdmin: 'Administrator account',
-    sectionEmail: 'Email & demo',
+    sectionEmail: 'Email',
+    sectionDemo: 'Demo mode',
     appName: 'App name',
     logo: 'Logo',
     language: 'Default language',

@@ -278,6 +278,14 @@ export default function SettingsPage() {
                 onChange={(e) => set('support_email', e.target.value)}
               />
             </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">{t('onboarding.sectionDemo')}</CardTitle>
+          </CardHeader>
+          <CardContent>
             <label className="flex items-center gap-2 text-sm">
               <Checkbox
                 checked={form.demo_mode}

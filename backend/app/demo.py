@@ -58,23 +58,31 @@ def is_enabled() -> bool:
 
 
 async def ensure_demo_user() -> None:
-    """Seed/refresh the demo user with the 'administrator' role. Idempotent.
+    """Sync the demo user to the current demo toggle. Idempotent.
 
-    Must run AFTER roles.ensure_schema_and_seed so the 'administrator' role
-    exists. The ON CONFLICT upgrades an existing demo user's role too, so
-    instances that previously seeded it as 'member' get promoted on next start.
+    Enabled  → seed/refresh the demo user as an ACTIVE administrator.
+    Disabled → deactivate any existing demo user (status='inactive') so the
+    public demo/demo credentials can no longer log in. Turning demo off (in the
+    onboarding wizard or settings) must not leave a live admin backdoor behind.
+
+    Must run AFTER roles.ensure_schema_and_seed so the 'administrator' role and
+    the role backfill exist.
     """
-    if not _demo_enabled():
-        return
     async with db.get_pool().acquire() as conn:
+        if not _demo_enabled():
+            await conn.execute(
+                "UPDATE users SET status = 'inactive' WHERE email = $1", DEMO_USERNAME
+            )
+            return
         admin_id = await conn.fetchval("SELECT id FROM roles WHERE name = $1", ADMIN_ROLE)
         await conn.execute(
             """
-            INSERT INTO users (name, surname, email, password_hash, role_id)
-            VALUES ('Demo', 'User', $1, $2, $3)
+            INSERT INTO users (name, surname, email, password_hash, role_id, status)
+            VALUES ('Demo', 'User', $1, $2, $3, 'active')
             ON CONFLICT (email) DO UPDATE
               SET password_hash = EXCLUDED.password_hash,
-                  role_id       = EXCLUDED.role_id
+                  role_id       = EXCLUDED.role_id,
+                  status        = 'active'
             """,
             DEMO_USERNAME,
             security.hash_password(DEMO_PASSWORD),
