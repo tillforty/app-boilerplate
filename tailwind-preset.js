@@ -22,6 +22,10 @@ export default {
       screens: { '2xl': '1400px' },
     },
     extend: {
+      maxWidth: {
+        // Global width of the main body / table content area. One knob for all pages.
+        content: '1400px',
+      },
       colors: {
         border: 'hsl(var(--border))',
         input: 'hsl(var(--input))',
