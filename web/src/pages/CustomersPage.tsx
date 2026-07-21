@@ -54,7 +54,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 
-const money = (n: number) => `$${n.toLocaleString()}`
+const money = (n: number) => `€${n.toLocaleString()}`
 const initials = (name: string) =>
   name.split(' ').map((p) => p[0]).slice(0, 2).join('').toUpperCase() || '?'
 const blankForm = (): CustomerInput => ({
@@ -398,7 +398,7 @@ export default function CustomersPage() {
                 </Select>
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="mrr">MRR ($)</Label>
+                <Label htmlFor="mrr">MRR (€)</Label>
                 <Input id="mrr" type="number" min={0} value={form.mrr} onChange={(e) => setForm({ ...form, mrr: Number(e.target.value) })} />
               </div>
               <div className="space-y-1.5">

@@ -6,7 +6,7 @@ export interface Stats {
   roles: number
   customers: number
   active_customers: number
-  mrr: number // summed MRR of active customers, USD
+  mrr: number // summed MRR of active customers, EUR
   files: number
 }
 

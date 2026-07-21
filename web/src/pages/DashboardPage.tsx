@@ -42,7 +42,7 @@ interface Dashboard {
   charts: DashboardChart[]
 }
 
-const money = (n: number) => `$${n.toLocaleString()}`
+const money = (n: number) => `€${n.toLocaleString()}`
 
 /** Build the Overview KPI cards from real database counts. */
 function overviewKpis(stats: Stats): Kpi[] {
@@ -83,10 +83,10 @@ const DASHBOARDS: Dashboard[] = [
     id: 'sales',
     label: 'Sales',
     kpis: [
-      { label: 'Monthly revenue', value: '$84,320', hint: '+8.4% vs last month', trend: 'up' },
+      { label: 'Monthly revenue', value: '€84,320', hint: '+8.4% vs last month', trend: 'up' },
       { label: 'New customers',   value: '134',     hint: 'this month',          trend: 'up' },
       { label: 'Churn rate',      value: '1.7%',    hint: '-0.3pp vs last month',trend: 'up' },
-      { label: 'Avg deal size',   value: '$629',    hint: '+$42 vs last month',  trend: 'up' },
+      { label: 'Avg deal size',   value: '€629',    hint: '+€42 vs last month',  trend: 'up' },
     ],
     charts: [
       {

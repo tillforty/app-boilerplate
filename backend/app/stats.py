@@ -17,7 +17,7 @@ class Stats(BaseModel):
     roles: int
     customers: int
     active_customers: int
-    mrr: int  # summed monthly recurring revenue of active customers, USD
+    mrr: int  # summed monthly recurring revenue of active customers, EUR
     files: int
 
 
