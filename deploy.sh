@@ -33,6 +33,11 @@
 #   N8N_ENABLED             set to "true" to bring up n8n (on host port N8N_PORT)
 #   N8N_PORT                n8n host port (default: 5678)
 #   TIMEZONE                n8n schedule-trigger timezone (default: UTC)
+#   SMTP_HOST/PORT/USERNAME/PASSWORD/FROM_EMAIL/FROM_NAME/STARTTLS/SSL
+#                           outbound email; seeds the mailer on first run so a
+#                           fresh box sends immediately. For Resend, pass
+#                           SMTP_HOST=smtp.resend.com SMTP_USERNAME=resend
+#                           SMTP_PASSWORD=re_... (the key stays out of the repo).
 #   GIT_URL                 repo to deploy (default: this repo on GitHub)
 #   BRANCH                  branch to deploy (default: main)
 #   APP_DIR                 checkout location (default: /opt/app-boilerplate)
@@ -144,6 +149,16 @@ export CADDY_TLS="${CADDY_TLS:-}"
 export N8N_ENABLED="${N8N_ENABLED:-}"
 export N8N_PORT="${N8N_PORT:-}"
 export TIMEZONE="${TIMEZONE:-}"
+# SMTP / outbound email — forwarded so a fresh install can seed a working mailer
+# (e.g. a Resend API key) without the secret ever living in the repo.
+export SMTP_HOST="${SMTP_HOST:-}"
+export SMTP_PORT="${SMTP_PORT:-}"
+export SMTP_USERNAME="${SMTP_USERNAME:-}"
+export SMTP_PASSWORD="${SMTP_PASSWORD:-}"
+export SMTP_STARTTLS="${SMTP_STARTTLS:-}"
+export SMTP_SSL="${SMTP_SSL:-}"
+export SMTP_FROM_EMAIL="${SMTP_FROM_EMAIL:-}"
+export SMTP_FROM_NAME="${SMTP_FROM_NAME:-}"
 
 [ -n "$DOMAIN" ] || warn "DOMAIN not set — deploying local-only (HTTP on :8080, no TLS)."
 
@@ -151,7 +166,7 @@ info "Handing off to start.sh…"
 cd "$APP_DIR"
 if [ -n "$SUDO" ]; then
   # Run the stack as root (Docker), forwarding the deploy vars through sudo.
-  exec sudo --preserve-env=DOMAIN,ACME_EMAIL,OAUTH_REDIRECT_BASE_URL,CADDY_TLS,N8N_ENABLED,N8N_PORT,TIMEZONE ./start.sh
+  exec sudo --preserve-env=DOMAIN,ACME_EMAIL,OAUTH_REDIRECT_BASE_URL,CADDY_TLS,N8N_ENABLED,N8N_PORT,TIMEZONE,SMTP_HOST,SMTP_PORT,SMTP_USERNAME,SMTP_PASSWORD,SMTP_STARTTLS,SMTP_SSL,SMTP_FROM_EMAIL,SMTP_FROM_NAME ./start.sh
 else
   exec ./start.sh
 fi

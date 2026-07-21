@@ -94,6 +94,20 @@ if [ ! -f .env ]; then
   [ -n "${N8N_PORT:-}" ]    && set_env N8N_PORT "$N8N_PORT"
   [ -n "${TIMEZONE:-}" ]    && set_env TIMEZONE "$TIMEZONE"
 
+  # SMTP / outbound-email deploy-time overrides. Lets a fresh project come up
+  # with a working mailer (e.g. a Resend API key as SMTP_PASSWORD) WITHOUT the
+  # secret ever living in the repo: pass them in the environment (deploy.sh
+  # forwards them) and they land only in this generated .env. Applied on
+  # first-run only, like the DOMAIN/n8n overrides above.
+  [ -n "${SMTP_HOST:-}" ]       && set_env SMTP_HOST       "$SMTP_HOST"
+  [ -n "${SMTP_PORT:-}" ]       && set_env SMTP_PORT       "$SMTP_PORT"
+  [ -n "${SMTP_USERNAME:-}" ]   && set_env SMTP_USERNAME   "$SMTP_USERNAME"
+  [ -n "${SMTP_PASSWORD:-}" ]   && { set_env SMTP_PASSWORD "$SMTP_PASSWORD"; info "SMTP_PASSWORD set from environment — outbound email enabled."; }
+  [ -n "${SMTP_STARTTLS:-}" ]   && set_env SMTP_STARTTLS   "$SMTP_STARTTLS"
+  [ -n "${SMTP_SSL:-}" ]        && set_env SMTP_SSL        "$SMTP_SSL"
+  [ -n "${SMTP_FROM_EMAIL:-}" ] && set_env SMTP_FROM_EMAIL "$SMTP_FROM_EMAIL"
+  [ -n "${SMTP_FROM_NAME:-}" ]  && set_env SMTP_FROM_NAME  "$SMTP_FROM_NAME"
+
   ok ".env created. DB/JWT/Vault secrets generated."
   warn "LLM keys (EMBEDDING_API_KEY / OPERATING_AGENT_API_KEY) are left as CHANGE_ME."
   warn "The app runs fine without them; fill them in .env to enable embeddings/LLM."

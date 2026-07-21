@@ -33,6 +33,7 @@ PERMISSION_CATALOG: list[dict] = [
     {"resource": "files", "label": "Files", "actions": ["read", "upload", "delete"]},
     {"resource": "vault", "label": "Vault", "actions": ["read", "write"]},
     {"resource": "customers", "label": "Customers", "actions": ["read", "create", "update", "delete"]},
+    {"resource": "emails", "label": "Emails", "actions": ["read", "sync", "delete", "configure"]},
     {"resource": "ai", "label": "AI", "actions": ["use"]},
 ]
 

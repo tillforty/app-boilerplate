@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { Settings, LogOut, User, ChevronDown, BookOpen, Menu } from 'lucide-react'
+import { Settings, LogOut, User, ChevronDown, Menu } from 'lucide-react'
 import { useAuth } from '@/context/AuthContext'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
@@ -122,16 +122,22 @@ export default function Header() {
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-48">
-            <DropdownMenuItem onClick={() => navigate('/settings/users')}>
-              <User className="mr-2 h-4 w-4" />
-              {t('nav.users')}
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onClick={() => window.open(appConfig.apiDocsUrl, '_blank', 'noopener,noreferrer')}
-            >
-              <BookOpen className="mr-2 h-4 w-4" />
-              {t('nav.apiDocs')}
-            </DropdownMenuItem>
+            {settingsNav.map((item) => {
+              const Icon = item.icon
+              return (
+                <DropdownMenuItem
+                  key={item.href}
+                  onClick={() =>
+                    item.external
+                      ? window.open(item.href, '_blank', 'noopener,noreferrer')
+                      : navigate(item.href)
+                  }
+                >
+                  <Icon className="mr-2 h-4 w-4" />
+                  {item.label}
+                </DropdownMenuItem>
+              )
+            })}
           </DropdownMenuContent>
         </DropdownMenu>
 
