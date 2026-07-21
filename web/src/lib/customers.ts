@@ -12,7 +12,7 @@ export interface Customer {
   company: string
   email: string
   status: CustomerStatus
-  mrr: number // monthly recurring revenue, USD
+  mrr: number // monthly recurring revenue, EUR
   seats: number
   joined: string // ISO date, derived from created_at on the backend
 }
