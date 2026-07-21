@@ -1,10 +1,12 @@
-"""Optional demo mode: a public, low-privilege login for showcasing the app.
+"""Optional demo mode: a public login for showcasing the app.
 
 When DEMO_MODE is on, a demo user (DEMO_USERNAME / DEMO_PASSWORD) is seeded with
-the limited 'member' role on startup, and GET /auth/demo advertises the
-credentials so the login screen can surface them. The login form is email-based
-but matches the stored value as a plain string, so DEMO_USERNAME works as-is
-(e.g. literally 'demo'). Configure via environment:
+the 'administrator' role on startup so demo visitors get the full admin
+experience, and GET /auth/demo advertises the credentials so the login screen
+can surface them. NOTE: this makes the public demo login a full administrator —
+only enable demo mode on a throwaway/showcase instance, never on real data. The
+login form is email-based but matches the stored value as a plain string, so
+DEMO_USERNAME works as-is (e.g. literally 'demo'). Configure via environment:
 
   DEMO_MODE      'true' to enable (default off)
   DEMO_USERNAME  login value for the demo user (default 'demo')
@@ -18,7 +20,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from . import db, security, settings
-from .roles import MEMBER_ROLE
+from .roles import ADMIN_ROLE
 
 
 def _bool(name: str, default: bool = False) -> bool:
@@ -56,17 +58,16 @@ def is_enabled() -> bool:
 
 
 async def ensure_demo_user() -> None:
-    """Seed/refresh the demo user with the 'member' role. Idempotent.
+    """Seed/refresh the demo user with the 'administrator' role. Idempotent.
 
-    Must run AFTER roles.ensure_schema_and_seed so the 'member' role exists and
-    the role backfill (which makes role-less users administrators) has already
-    run — the demo user is inserted with an explicit member role_id so it is
-    never elevated to administrator.
+    Must run AFTER roles.ensure_schema_and_seed so the 'administrator' role
+    exists. The ON CONFLICT upgrades an existing demo user's role too, so
+    instances that previously seeded it as 'member' get promoted on next start.
     """
     if not _demo_enabled():
         return
     async with db.get_pool().acquire() as conn:
-        member_id = await conn.fetchval("SELECT id FROM roles WHERE name = $1", MEMBER_ROLE)
+        admin_id = await conn.fetchval("SELECT id FROM roles WHERE name = $1", ADMIN_ROLE)
         await conn.execute(
             """
             INSERT INTO users (name, surname, email, password_hash, role_id)
@@ -77,7 +78,7 @@ async def ensure_demo_user() -> None:
             """,
             DEMO_USERNAME,
             security.hash_password(DEMO_PASSWORD),
-            member_id,
+            admin_id,
         )
 
 
