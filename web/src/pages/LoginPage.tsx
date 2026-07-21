@@ -14,6 +14,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { appConfig } from '@/config/app-config'
+import { useAppSettings } from '@/context/AppSettingsContext'
 
 function GoogleIcon() {
   return (
@@ -45,7 +46,10 @@ const PROVIDER_ICONS: Record<string, () => JSX.Element> = {
 export default function LoginPage() {
   const { t } = useTranslation()
   const { login } = useAuth()
+  const { settings } = useAppSettings()
   const navigate = useNavigate()
+  const appName = settings?.app_name ?? appConfig.brand.name
+  const logoSrc = settings?.logo_url ?? appConfig.brand.logoSrc
 
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -93,7 +97,7 @@ export default function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-muted/40 p-4">
       <Card className="w-full max-w-sm">
         <CardHeader className="space-y-3 text-center">
-          <img src={appConfig.brand.logoSrc} alt={appConfig.brand.name} className="mx-auto h-8" />
+          <img src={logoSrc} alt={appName} className="mx-auto h-8" />
           <CardTitle>{t('auth.title')}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">

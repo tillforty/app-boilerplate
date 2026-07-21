@@ -4,6 +4,8 @@ import {
   Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, XAxis, YAxis,
 } from 'recharts'
 import { useAuth } from '@/context/AuthContext'
+import { useAppSettings } from '@/context/AppSettingsContext'
+import { formatMoney } from '@/lib/format'
 import { getStats, type Stats } from '@/lib/stats'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -42,14 +44,12 @@ interface Dashboard {
   charts: DashboardChart[]
 }
 
-const money = (n: number) => `€${n.toLocaleString()}`
-
 /** Build the Overview KPI cards from real database counts. */
-function overviewKpis(stats: Stats): Kpi[] {
+function overviewKpis(stats: Stats, currencySymbol: string): Kpi[] {
   return [
     { label: 'Users',      value: stats.users.toLocaleString(),     hint: 'registered accounts',                    trend: 'neutral' },
     { label: 'Customers',  value: stats.customers.toLocaleString(),  hint: `${stats.active_customers} active`,       trend: 'neutral' },
-    { label: 'Active MRR', value: money(stats.mrr),                  hint: 'from active customers',                  trend: 'up'      },
+    { label: 'Active MRR', value: formatMoney(stats.mrr, currencySymbol), hint: 'from active customers',            trend: 'up'      },
     { label: 'Files',      value: stats.files.toLocaleString(),      hint: 'stored via the files API',               trend: 'neutral' },
   ]
 }
@@ -257,6 +257,8 @@ function DashboardChart({ chart }: { chart: DashboardChart }) {
 
 export default function DashboardPage() {
   const { user } = useAuth()
+  const { settings } = useAppSettings()
+  const currencySymbol = settings?.currency_symbol ?? '€'
   const [activeDashboard, setActiveDashboard] = useState(DASHBOARDS[0].id)
   const [loading, setLoading] = useState(true)
   const [stats, setStats] = useState<Stats | null>(null)
@@ -280,7 +282,7 @@ export default function DashboardPage() {
 
   const dashboard = DASHBOARDS.find((d) => d.id === activeDashboard) ?? DASHBOARDS[0]
   // Overview shows live data; other tabs use their sample KPIs.
-  const kpis = dashboard.live ? (stats ? overviewKpis(stats) : []) : dashboard.kpis
+  const kpis = dashboard.live ? (stats ? overviewKpis(stats, currencySymbol) : []) : dashboard.kpis
   const kpisLoading = dashboard.live ? stats === null : loading
 
   return (

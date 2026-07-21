@@ -50,6 +50,14 @@ export interface Dictionary {
   >
   demo: Record<'readOnly' | 'usersDisabled', string>
   language: Record<'label', string>
+  onboarding: Record<
+    | 'title' | 'subtitle' | 'sectionApp' | 'sectionAdmin' | 'sectionEmail'
+    | 'appName' | 'logo' | 'language' | 'currency' | 'currencySymbol' | 'timezone'
+    | 'adminName' | 'adminSurname' | 'adminEmail' | 'adminPassword' | 'passwordHint'
+    | 'fromName' | 'fromEmail' | 'supportEmail' | 'demoMode'
+    | 'submit' | 'submitting' | 'failed' | 'logoNotImage' | 'logoTooLarge',
+    string
+  >
 }
 
 export const en: Dictionary = {
@@ -188,5 +196,32 @@ export const en: Dictionary = {
   },
   language: {
     label: 'Language',
+  },
+  onboarding: {
+    title: 'Welcome — let’s set up your app',
+    subtitle: 'These details configure this instance. You can change them later in settings.',
+    sectionApp: 'App',
+    sectionAdmin: 'Administrator account',
+    sectionEmail: 'Email & demo',
+    appName: 'App name',
+    logo: 'Logo',
+    language: 'Default language',
+    currency: 'Currency',
+    currencySymbol: 'Currency symbol',
+    timezone: 'Timezone',
+    adminName: 'First name',
+    adminSurname: 'Last name',
+    adminEmail: 'Email',
+    adminPassword: 'Password',
+    passwordHint: 'At least 8 characters. This is the administrator login.',
+    fromName: 'Sender name',
+    fromEmail: 'Sender email',
+    supportEmail: 'Support email',
+    demoMode: 'Enable demo mode (public read-only login)',
+    submit: 'Complete setup',
+    submitting: 'Setting up…',
+    failed: 'Setup failed',
+    logoNotImage: 'The logo must be an image file.',
+    logoTooLarge: 'The logo must be 2 MB or smaller.',
   },
 }

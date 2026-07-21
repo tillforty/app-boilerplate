@@ -14,6 +14,8 @@ import {
 import { listRoles, assignRole, type Role } from '@/lib/roles'
 import { usePermissions } from '@/context/PermissionsContext'
 import { useDemo } from '@/context/DemoContext'
+import { useAppSettings } from '@/context/AppSettingsContext'
+import { formatDate } from '@/lib/format'
 import { useTranslation } from '@/i18n'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
@@ -56,17 +58,11 @@ function initials(name: string, surname: string): string {
   return `${name.charAt(0)}${surname.charAt(0)}`.toUpperCase() || '?'
 }
 
-function formatDate(iso: string): string {
-  const d = new Date(iso)
-  return Number.isNaN(d.getTime())
-    ? '—'
-    : d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
-}
-
 export default function UsersPage() {
   const { t } = useTranslation()
   const { can } = usePermissions()
   const { enabled: demoMode } = useDemo()
+  const { settings } = useAppSettings()
   const canManage = can('users:update')
   // Demo mode is read-only: never expose user creation/invites, even if the
   // demo account's role happens to grant the permission.
@@ -355,7 +351,7 @@ export default function UsersPage() {
                       <span className="text-muted-foreground">—</span>
                     )}
                   </TableCell>
-                  <TableCell className="text-muted-foreground">{formatDate(u.created_at)}</TableCell>
+                  <TableCell className="text-muted-foreground">{formatDate(u.created_at, settings?.timezone)}</TableCell>
                   {canManage && (
                     <TableCell className="text-right">
                       <Select

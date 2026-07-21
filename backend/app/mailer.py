@@ -58,7 +58,23 @@ def is_configured() -> bool:
 
 
 def _from_address() -> str:
-    return f"{SMTP_FROM_NAME} <{SMTP_FROM_EMAIL}>" if SMTP_FROM_NAME else SMTP_FROM_EMAIL
+    # The from IDENTITY (name + address) is editable via app_settings; the
+    # transport CREDENTIALS above are not. Read the identity from the settings
+    # sync cache (this runs in a threadpool, so it can't await the DB pool),
+    # falling back to the env values when unset. Lazy import avoids a cycle
+    # (auth → mailer, settings → auth).
+    name, email = SMTP_FROM_NAME, SMTP_FROM_EMAIL
+    try:
+        from . import settings
+
+        s_name, s_email = settings.get_from_identity()
+        if s_email:
+            email = s_email
+        if s_name:
+            name = s_name
+    except Exception:
+        pass  # best-effort, matches the mailer's swallow-and-continue ethos
+    return f"{name} <{email}>" if name else email
 
 
 def _send_via_resend(

@@ -13,6 +13,8 @@ import {
   type CustomerStatus,
 } from '@/lib/customers'
 import { ApiError } from '@/lib/api'
+import { formatMoney } from '@/lib/format'
+import { useAppSettings } from '@/context/AppSettingsContext'
 import { PermissionGate } from '@/components/PermissionGate'
 import { DataLoadError } from '@/components/DataLoadError'
 import { Button } from '@/components/ui/button'
@@ -54,7 +56,6 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 
-const money = (n: number) => `€${n.toLocaleString()}`
 const initials = (name: string) =>
   name.split(' ').map((p) => p[0]).slice(0, 2).join('').toUpperCase() || '?'
 const blankForm = (): CustomerInput => ({
@@ -67,6 +68,8 @@ const blankForm = (): CustomerInput => ({
 })
 
 export default function CustomersPage() {
+  const { settings } = useAppSettings()
+  const currencySymbol = settings?.currency_symbol ?? '€'
   const [rows, setRows] = useState<Customer[] | null>(null)
   const [loadError, setLoadError] = useState<unknown>(null)
   const [query, setQuery] = useState('')
@@ -203,7 +206,7 @@ export default function CustomersPage() {
         {[
           { label: 'Total customers', value: loading ? null : String(stats.total) },
           { label: 'Active', value: loading ? null : String(stats.active) },
-          { label: 'Active MRR', value: loading ? null : money(stats.mrr) },
+          { label: 'Active MRR', value: loading ? null : formatMoney(stats.mrr, currencySymbol) },
         ].map((s) => (
           <Card key={s.label}>
             <CardHeader className="pb-2">
@@ -306,7 +309,7 @@ export default function CustomersPage() {
                   <TableCell>
                     <Badge variant={STATUS_VARIANT[c.status]}>{STATUS_LABEL[c.status]}</Badge>
                   </TableCell>
-                  <TableCell className="text-right tabular-nums">{money(c.mrr)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{formatMoney(c.mrr, currencySymbol)}</TableCell>
                   <TableCell className="text-right tabular-nums">{c.seats}</TableCell>
                   <TableCell>
                     <DropdownMenu>
@@ -398,7 +401,7 @@ export default function CustomersPage() {
                 </Select>
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="mrr">MRR (€)</Label>
+                <Label htmlFor="mrr">MRR ({currencySymbol})</Label>
                 <Input id="mrr" type="number" min={0} value={form.mrr} onChange={(e) => setForm({ ...form, mrr: Number(e.target.value) })} />
               </div>
               <div className="space-y-1.5">

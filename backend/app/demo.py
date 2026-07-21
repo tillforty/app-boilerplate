@@ -17,7 +17,7 @@ import os
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from . import db, security
+from . import db, security, settings
 from .roles import MEMBER_ROLE
 
 
@@ -41,8 +41,18 @@ class DemoInfo(BaseModel):
     password: str | None = None
 
 
-def is_enabled() -> bool:
+def _demo_enabled() -> bool:
+    """Runtime demo toggle. Once the instance is onboarded, app_settings is
+    authoritative; before that, fall back to the env DEMO_MODE default so
+    pre-onboarding behavior is unchanged. Reads the sync settings cache (warmed
+    at startup, refreshed on every settings write) — no DB round-trip needed."""
+    if settings.onboarded_cached():
+        return settings.demo_mode_cached()
     return DEMO_MODE
+
+
+def is_enabled() -> bool:
+    return _demo_enabled()
 
 
 async def ensure_demo_user() -> None:
@@ -53,7 +63,7 @@ async def ensure_demo_user() -> None:
     run — the demo user is inserted with an explicit member role_id so it is
     never elevated to administrator.
     """
-    if not DEMO_MODE:
+    if not _demo_enabled():
         return
     async with db.get_pool().acquire() as conn:
         member_id = await conn.fetchval("SELECT id FROM roles WHERE name = $1", MEMBER_ROLE)
@@ -73,7 +83,7 @@ async def ensure_demo_user() -> None:
 
 @router.get("/demo", response_model=DemoInfo)
 async def demo_info() -> DemoInfo:
-    """Advertise the demo credentials when DEMO_MODE is on (else enabled=false)."""
-    if not DEMO_MODE:
+    """Advertise the demo credentials when demo mode is on (else enabled=false)."""
+    if not _demo_enabled():
         return DemoInfo(enabled=False)
     return DemoInfo(enabled=True, username=DEMO_USERNAME, password=DEMO_PASSWORD)

@@ -20,6 +20,7 @@ import {
 } from '@/components/ui/sheet'
 import { cn } from '@/lib/utils'
 import { appConfig, type NavItem } from '@/config/app-config'
+import { useAppSettings } from '@/context/AppSettingsContext'
 import { useTranslation } from '@/i18n'
 import { LanguageSwitcher } from '@/i18n/LanguageSwitcher'
 
@@ -28,7 +29,11 @@ export default function Header() {
   const navigate = useNavigate()
   const location = useLocation()
   const { t } = useTranslation()
+  const { settings } = useAppSettings()
   const { brand, nav, settingsNav } = appConfig
+  // Runtime branding from onboarding, falling back to the build-time defaults.
+  const appName = settings?.app_name ?? brand.name
+  const logoSrc = settings?.logo_url ?? brand.logoSrc
   const [mobileOpen, setMobileOpen] = useState(false)
 
   // Close the mobile nav whenever the route changes.
@@ -88,7 +93,7 @@ export default function Header() {
           <Menu className="h-5 w-5 text-gray-600" />
         </Button>
         <Link to="/" className="flex items-center shrink-0">
-          <img src={brand.logoSrc} alt={brand.name} className="h-5" />
+          <img src={logoSrc} alt={appName} className="h-5" />
         </Link>
       </div>
 
@@ -186,7 +191,7 @@ export default function Header() {
         <SheetContent side="left" className="w-72 p-0">
           <SheetHeader className="border-b px-4 py-3 text-left">
             <SheetTitle className="flex items-center">
-              <img src={brand.logoSrc} alt={brand.name} className="h-6" />
+              <img src={logoSrc} alt={appName} className="h-6" />
             </SheetTitle>
           </SheetHeader>
           <nav className="space-y-1 p-3">
