@@ -168,6 +168,7 @@ export interface Dictionary {
     | 'newJob' | 'newJobHint' | 'titleGenerated'
     | 'prompt' | 'promptPlaceholder' | 'start' | 'starting'
     | 'jobsEmpty' | 'jobsEmptyTitle'
+    | 'pendingTitle' | 'deployedTitle' | 'deployedEmpty' | 'deployedEmptyTitle'
     | 'colJob' | 'colAgent' | 'colStatus' | 'colPr' | 'colDeployed' | 'colCreated'
     | 'colStartedBy' | 'startedBy'
     | 'status_pending' | 'status_running' | 'status_answer_pending' | 'status_merged'
@@ -585,6 +586,10 @@ export const en: Dictionary = {
     starting: 'Starting…',
     jobsEmpty: 'Jobs you start will appear here with their progress.',
     jobsEmptyTitle: 'No jobs yet',
+    pendingTitle: 'Pending deploy',
+    deployedTitle: 'Deployed',
+    deployedEmpty: 'Jobs appear here once a release ships them.',
+    deployedEmptyTitle: 'Nothing deployed yet',
     colJob: 'Job',
     colAgent: 'Agent',
     colStatus: 'Status',

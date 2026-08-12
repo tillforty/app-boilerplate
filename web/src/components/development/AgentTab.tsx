@@ -86,6 +86,10 @@ const STATUS_CLASS: Record<JobStatus, string> = {
     'bg-zinc-100 text-zinc-600 border-zinc-200 dark:bg-zinc-400/15 dark:text-zinc-400 dark:border-zinc-400/25',
 }
 
+/** The board is split in two: work on its way to production, and work that got
+ *  there. Each table drops the columns the other one needs. */
+type JobsVariant = 'pending' | 'deployed'
+
 function fmt(dt: string | null): string {
   if (!dt) return '—'
   const d = new Date(dt)
@@ -253,6 +257,10 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
   )
   /** Merged and waiting: the batch the next release would ship. */
   const readyCount = useMemo(() => jobs.filter((j) => j.status === 'merged').length, [jobs])
+  /** Everything still on its way to production — including the jobs that failed
+   *  or were cancelled, so nothing quietly disappears from the board. */
+  const pendingJobs = useMemo(() => jobs.filter((j) => j.status !== 'deployed'), [jobs])
+  const deployedJobs = useMemo(() => jobs.filter((j) => j.status === 'deployed'), [jobs])
 
   useEffect(() => {
     if (!hasLive) return
@@ -333,6 +341,162 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
     !!config?.agent.configured &&
     prompt.trim().length >= 5
 
+  /** One job row. The two tables share it because the columns they don't have
+   *  in common are exactly the ones that are dead weight on the other side:
+   *  a shipped job has no action left to take, and an unshipped one has no
+   *  release to name. */
+  function jobRow(job: Job, variant: JobsVariant) {
+    return (
+      <TableRow key={job.id}>
+        <TableCell className="max-w-sm">
+          <button
+            type="button"
+            className="truncate text-left font-medium hover:underline"
+            onClick={() =>
+              void getJob(job.id)
+                .then(setDetail)
+                .catch((e) => setError(e instanceof Error ? e.message : t('agent.loadFailed')))
+            }
+          >
+            {job.title}
+          </button>
+          {job.error && <div className="truncate text-xs text-destructive">{job.error}</div>}
+        </TableCell>
+        <TableCell className="whitespace-nowrap text-muted-foreground">
+          {job.created_by_name ?? '—'}
+        </TableCell>
+        <TableCell className="whitespace-nowrap text-muted-foreground">
+          {t(`agent.agent_${job.agent}`)}
+        </TableCell>
+        {variant === 'pending' && (
+          <TableCell>
+            <JobStatusBadge status={job.status} />
+          </TableCell>
+        )}
+        <TableCell>
+          <PrLink number={job.pr_number} url={job.pr_url} />
+        </TableCell>
+        {variant === 'deployed' && (
+          <TableCell>
+            <DeployedCell release={job.release_id ? releaseById.get(job.release_id) : undefined} />
+          </TableCell>
+        )}
+        <TableCell className="whitespace-nowrap text-muted-foreground">
+          {fmt(job.created_at)}
+        </TableCell>
+        {variant === 'pending' && (
+          <TableCell className="text-right">
+            <div className="flex justify-end gap-2">
+              {job.status === 'pending' && canRun && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={busyId === job.id}
+                  onClick={() => {
+                    setEditFor(job)
+                    setEditPrompt(job.prompt)
+                  }}
+                >
+                  <Pencil className="mr-2 h-4 w-4" />
+                  {t('common.edit')}
+                </Button>
+              )}
+              {job.status === 'answer_pending' && canRun && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={busyId === job.id}
+                  onClick={() => {
+                    setAnswerFor(job)
+                    setAnswer('')
+                  }}
+                >
+                  <MessageCircleQuestion className="mr-2 h-4 w-4" />
+                  {t('agent.answer')}
+                </Button>
+              )}
+              {job.status === 'deployment_ready' && canRun && (
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={busyId === job.id || !config?.deploy_enabled}
+                  title={config?.deploy_enabled ? undefined : t('agent.deployDisabled')}
+                  onClick={() =>
+                    void act(job.id, () => requestMerge(job.id), t('agent.mergeFailed'))
+                  }
+                >
+                  <GitMerge className="mr-2 h-4 w-4" />
+                  {t('agent.retryMerge')}
+                </Button>
+              )}
+              {(job.status === 'failed' || job.status === 'cancelled') && canRun && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={busyId === job.id}
+                  onClick={() => void act(job.id, () => retryJob(job.id), t('agent.retryFailed'))}
+                >
+                  <RotateCcw className="mr-2 h-4 w-4" />
+                  {t('agent.retry')}
+                </Button>
+              )}
+              {JOB_IN_PROGRESS.includes(job.status) && job.status !== 'deploying' && canRun && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  disabled={busyId === job.id}
+                  onClick={() => void act(job.id, () => cancelJob(job.id), t('agent.cancelFailed'))}
+                >
+                  <Ban className="mr-2 h-4 w-4" />
+                  {t('common.cancel')}
+                </Button>
+              )}
+            </div>
+          </TableCell>
+        )}
+      </TableRow>
+    )
+  }
+
+  function jobsTable(variant: JobsVariant, rows: Job[], emptyTitle: string, empty: string) {
+    return (
+      <div className="rounded-lg border">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>{t('agent.colJob')}</TableHead>
+              <TableHead>{t('agent.colStartedBy')}</TableHead>
+              <TableHead>{t('agent.colAgent')}</TableHead>
+              {variant === 'pending' && <TableHead>{t('agent.colStatus')}</TableHead>}
+              <TableHead>{t('agent.colPr')}</TableHead>
+              {variant === 'deployed' && <TableHead>{t('agent.colDeployed')}</TableHead>}
+              <TableHead>{t('agent.colCreated')}</TableHead>
+              {variant === 'pending' && (
+                <TableHead className="text-right">{t('development.colActions')}</TableHead>
+              )}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.length === 0 ? (
+              <TableEmptyState
+                colSpan={variant === 'pending' ? 7 : 6}
+                icon={variant === 'pending' ? Bot : Rocket}
+                title={emptyTitle}
+                description={empty}
+              />
+            ) : (
+              rows.map((job) => jobRow(job, variant))
+            )}
+          </TableBody>
+        </Table>
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-6">
       {error && (
@@ -385,151 +549,18 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
           )}
         </div>
 
-        <div className="rounded-lg border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>{t('agent.colJob')}</TableHead>
-                <TableHead>{t('agent.colStartedBy')}</TableHead>
-                <TableHead>{t('agent.colAgent')}</TableHead>
-                <TableHead>{t('agent.colStatus')}</TableHead>
-                <TableHead>{t('agent.colPr')}</TableHead>
-                <TableHead>{t('agent.colDeployed')}</TableHead>
-                <TableHead>{t('agent.colCreated')}</TableHead>
-                <TableHead className="text-right">{t('development.colActions')}</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {jobs.length === 0 ? (
-                <TableEmptyState
-                  colSpan={8}
-                  icon={Bot}
-                  title={t('agent.jobsEmptyTitle')}
-                  description={t('agent.jobsEmpty')}
-                />
-              ) : (
-                jobs.map((job) => (
-                  <TableRow key={job.id}>
-                    <TableCell className="max-w-sm">
-                      <button
-                        type="button"
-                        className="truncate text-left font-medium hover:underline"
-                        onClick={() =>
-                          void getJob(job.id)
-                            .then(setDetail)
-                            .catch((e) =>
-                              setError(e instanceof Error ? e.message : t('agent.loadFailed')),
-                            )
-                        }
-                      >
-                        {job.title}
-                      </button>
-                      {job.error && (
-                        <div className="truncate text-xs text-destructive">{job.error}</div>
-                      )}
-                    </TableCell>
-                    <TableCell className="whitespace-nowrap text-muted-foreground">
-                      {job.created_by_name ?? '—'}
-                    </TableCell>
-                    <TableCell className="whitespace-nowrap text-muted-foreground">
-                      {t(`agent.agent_${job.agent}`)}
-                    </TableCell>
-                    <TableCell>
-                      <JobStatusBadge status={job.status} />
-                    </TableCell>
-                    <TableCell>
-                      <PrLink number={job.pr_number} url={job.pr_url} />
-                    </TableCell>
-                    <TableCell>
-                      <DeployedCell release={job.release_id ? releaseById.get(job.release_id) : undefined} />
-                    </TableCell>
-                    <TableCell className="whitespace-nowrap text-muted-foreground">
-                      {fmt(job.created_at)}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex justify-end gap-2">
-                        {job.status === 'pending' && canRun && (
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            disabled={busyId === job.id}
-                            onClick={() => {
-                              setEditFor(job)
-                              setEditPrompt(job.prompt)
-                            }}
-                          >
-                            <Pencil className="mr-2 h-4 w-4" />
-                            {t('common.edit')}
-                          </Button>
-                        )}
-                        {job.status === 'answer_pending' && canRun && (
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            disabled={busyId === job.id}
-                            onClick={() => {
-                              setAnswerFor(job)
-                              setAnswer('')
-                            }}
-                          >
-                            <MessageCircleQuestion className="mr-2 h-4 w-4" />
-                            {t('agent.answer')}
-                          </Button>
-                        )}
-                        {job.status === 'deployment_ready' && canRun && (
-                          <Button
-                            type="button"
-                            size="sm"
-                            disabled={busyId === job.id || !config?.deploy_enabled}
-                            title={config?.deploy_enabled ? undefined : t('agent.deployDisabled')}
-                            onClick={() =>
-                              void act(job.id, () => requestMerge(job.id), t('agent.mergeFailed'))
-                            }
-                          >
-                            <GitMerge className="mr-2 h-4 w-4" />
-                            {t('agent.retryMerge')}
-                          </Button>
-                        )}
-                        {(job.status === 'failed' || job.status === 'cancelled') && canRun && (
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            disabled={busyId === job.id}
-                            onClick={() =>
-                              void act(job.id, () => retryJob(job.id), t('agent.retryFailed'))
-                            }
-                          >
-                            <RotateCcw className="mr-2 h-4 w-4" />
-                            {t('agent.retry')}
-                          </Button>
-                        )}
-                        {JOB_IN_PROGRESS.includes(job.status) &&
-                          job.status !== 'deploying' &&
-                          canRun && (
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="ghost"
-                              disabled={busyId === job.id}
-                              onClick={() =>
-                                void act(job.id, () => cancelJob(job.id), t('agent.cancelFailed'))
-                              }
-                            >
-                              <Ban className="mr-2 h-4 w-4" />
-                              {t('common.cancel')}
-                            </Button>
-                          )}
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </div>
+        <p className="text-xs font-medium text-muted-foreground">{t('agent.pendingTitle')}</p>
+        {jobsTable('pending', pendingJobs, t('agent.jobsEmptyTitle'), t('agent.jobsEmpty'))}
+
+        <p className="pt-2 text-xs font-medium text-muted-foreground">
+          {t('agent.deployedTitle')}
+        </p>
+        {jobsTable(
+          'deployed',
+          deployedJobs,
+          t('agent.deployedEmptyTitle'),
+          t('agent.deployedEmpty'),
+        )}
       </div>
 
       {/* ── New job ─────────────────────────────────────────────────────── */}
