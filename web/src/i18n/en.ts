@@ -172,7 +172,7 @@ export interface Dictionary {
     | 'jobsEmpty' | 'jobsEmptyTitle'
     | 'pendingTitle' | 'deployedTitle' | 'deployedEmpty' | 'deployedEmptyTitle'
     | 'colJob' | 'colAgent' | 'colStatus' | 'colPr' | 'colDeployed' | 'colCreated'
-    | 'colStartedBy' | 'startedBy'
+    | 'colStartedBy' | 'startedBy' | 'colCost' | 'costMerge' | 'costTooltip'
     | 'status_pending' | 'status_running' | 'status_answer_pending' | 'status_merged'
     | 'status_deployment_ready' | 'status_deploying' | 'status_deployed'
     | 'status_failed' | 'status_cancelled'
@@ -609,6 +609,9 @@ export const en: Dictionary = {
     colCreated: 'Created',
     colStartedBy: 'Started by',
     startedBy: 'started by',
+    colCost: 'Cost',
+    costMerge: '{amount} on conflicts',
+    costTooltip: '{input} in · {output} out · {cached} cached',
     status_pending: 'Pending',
     status_running: 'Building',
     status_answer_pending: 'Answer pending',

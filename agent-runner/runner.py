@@ -81,8 +81,10 @@ DEPLOY_IMAGE = os.environ.get("AGENT_RUNNER_IMAGE", "tillforty-agent-runner:loca
 
 # CLI invocations, overridable so a flag rename upstream doesn't block a deploy.
 # The prompt is appended as the final argument.
+# --output-format json is what makes a run costable: the envelope carries
+# total_cost_usd and the token counts alongside the text result.
 CLAUDE_ARGS = os.environ.get(
-    "AGENT_CLAUDE_ARGS", "-p --permission-mode bypassPermissions"
+    "AGENT_CLAUDE_ARGS", "-p --permission-mode bypassPermissions --output-format json"
 ).split()
 CODEX_ARGS = os.environ.get(
     "AGENT_CODEX_ARGS", "exec --dangerously-bypass-approvals-and-sandbox"
@@ -205,6 +207,60 @@ async def event(pool, job_id: int, kind: str, message: str) -> None:
     await pool.execute(
         "INSERT INTO dev_job_events (job_id, kind, message) VALUES ($1, $2, $3)",
         job_id, kind, message[:4000],
+    )
+
+
+def usage_of(agent: str, stdout: str) -> dict | None:
+    """Cost and tokens for one CLI run, or None if we can't tell.
+
+    Claude's `--output-format json` prints a single result envelope carrying
+    `total_cost_usd` and a `usage` block. Codex reports its usage differently, so
+    it stays unbilled rather than guessed at — a wrong number is worse than none.
+    """
+    if agent != "claude_code" or not (stdout or "").strip():
+        return None
+    try:
+        data = json.loads(stdout)
+    except ValueError:
+        return None  # a plain-text run (AGENT_CLAUDE_ARGS overridden), not an error
+    if isinstance(data, list):  # stream-json leaves a list of events
+        data = next(
+            (d for d in reversed(data) if isinstance(d, dict) and d.get("type") == "result"),
+            None,
+        )
+    if not isinstance(data, dict):
+        return None
+    u = data.get("usage") or {}
+    return {
+        "cost_usd": float(data.get("total_cost_usd") or 0),
+        "input_tokens": int(u.get("input_tokens") or 0),
+        "output_tokens": int(u.get("output_tokens") or 0),
+        "cache_read_tokens": int(u.get("cache_read_input_tokens") or 0),
+        "result": data.get("result") or "",
+    }
+
+
+async def bill(pool, job_id: int, usage: dict | None, merge: bool = False) -> None:
+    """Add one CLI run to a job's running total.
+
+    Always `+`, never `=`: a job runs the CLI again for every answer round, every
+    retry, and every conflict resolution, and all of it is the job's cost.
+    """
+    if not usage:
+        return
+    await pool.execute(
+        """
+        UPDATE dev_jobs SET
+            cost_usd          = cost_usd + $2,
+            input_tokens      = input_tokens + $3,
+            output_tokens     = output_tokens + $4,
+            cache_read_tokens = cache_read_tokens + $5,
+            merge_cost_usd    = merge_cost_usd + $6,
+            updated_at        = now()
+        WHERE id = $1
+        """,
+        job_id, usage["cost_usd"], usage["input_tokens"], usage["output_tokens"],
+        usage["cache_read_tokens"], usage["cost_usd"] if merge else 0,
     )
 
 
@@ -583,6 +639,13 @@ async def run_job(pool, job) -> None:
         # never this container's secrets.
         proc = run(cmd, cwd=workdir, env=env, timeout=AGENT_TIMEOUT, user=AGENT_USER,
                    inherit_env=False)
+        usage = usage_of(job["agent"], proc.stdout)
+        await bill(pool, job_id, usage)
+        if usage and usage["result"]:
+            # The transcript is read by humans in the job dialog — keep the text
+            # result rather than the JSON envelope it now arrives in. Only when
+            # there IS one: an envelope without `result` must not blank the log.
+            proc.stdout = usage["result"]
         record(" ".join(cmd[:-1]) + " <prompt>", proc)
 
         if not await still_active(pool, job_id):
@@ -839,7 +902,13 @@ async def resolve_conflicts(pool, job, repo: str, token: str, base_branch: str) 
             cmd += ["--model", job["model"]]
         cmd.append(prompt)
 
-        proc = run(cmd, cwd=workdir, env=env, timeout=AGENT_TIMEOUT, user=AGENT_USER)
+        # inherit_env=False for the same reason as the main run: this is the other
+        # place we execute LLM-written code.
+        proc = run(cmd, cwd=workdir, env=env, timeout=AGENT_TIMEOUT, user=AGENT_USER,
+                   inherit_env=False)
+        # Conflict resolution is work the job caused, so it lands on the job's bill
+        # — kept as its own column so merge overhead stays visible.
+        await bill(pool, job_id, usage_of(job["agent"], proc.stdout), merge=True)
         if proc.returncode != 0:
             return False, f"The agent exited {proc.returncode} while resolving the conflict."
 

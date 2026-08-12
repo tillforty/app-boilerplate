@@ -146,6 +146,14 @@ export interface Job {
   files: JobFile[]
   merged_at: string | null
   release_id: number | null
+  /** What the job cost to complete, summed over every CLI run it took.
+   *  `merge_cost_usd` is the slice spent resolving conflicts — a subset of
+   *  `cost_usd`, not an addition to it. */
+  cost_usd: number
+  merge_cost_usd: number
+  input_tokens: number
+  output_tokens: number
+  cache_read_tokens: number
   created_by_name: string | null
   created_at: string
   started_at: string | null

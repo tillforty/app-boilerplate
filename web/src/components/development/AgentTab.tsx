@@ -105,6 +105,42 @@ function fmt(dt: string | null): string {
   return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString()
 }
 
+/** Sub-cent runs are common, so don't round them away to "$0.00". */
+function fmtCost(usd: number): string {
+  if (!usd) return '—'
+  return usd < 0.01 ? `<$0.01` : `$${usd.toFixed(2)}`
+}
+
+function fmtTokens(n: number): string {
+  if (n < 1000) return String(n)
+  if (n < 1_000_000) return `${(n / 1000).toFixed(1)}k`
+  return `${(n / 1_000_000).toFixed(1)}M`
+}
+
+/** Cost of a job, with the merge-conflict share called out — a job that cost
+ *  most of its money getting past a stale branch is worth seeing. */
+function CostCell({ job }: { job: Job }) {
+  const { t } = useTranslation()
+  if (!job.cost_usd) return <span className="text-muted-foreground">—</span>
+  return (
+    <div
+      className="whitespace-nowrap"
+      title={t('agent.costTooltip', {
+        input: fmtTokens(job.input_tokens),
+        output: fmtTokens(job.output_tokens),
+        cached: fmtTokens(job.cache_read_tokens),
+      })}
+    >
+      <div className="text-xs font-medium tabular-nums">{fmtCost(job.cost_usd)}</div>
+      {job.merge_cost_usd > 0 && (
+        <div className="text-xs text-muted-foreground">
+          {t('agent.costMerge', { amount: fmtCost(job.merge_cost_usd) })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function fmtSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
@@ -573,6 +609,9 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
             <DeployedCell release={job.release_id ? releaseById.get(job.release_id) : undefined} />
           </TableCell>
         )}
+        <TableCell>
+          <CostCell job={job} />
+        </TableCell>
         <TableCell className="whitespace-nowrap text-muted-foreground">
           {fmt(job.created_at)}
         </TableCell>
@@ -666,6 +705,7 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
               {variant === 'pending' && <TableHead>{t('agent.colStatus')}</TableHead>}
               <TableHead>{t('agent.colPr')}</TableHead>
               {variant === 'deployed' && <TableHead>{t('agent.colDeployed')}</TableHead>}
+              <TableHead>{t('agent.colCost')}</TableHead>
               <TableHead>{t('agent.colCreated')}</TableHead>
               {variant === 'pending' && (
                 <TableHead className="text-right">{t('development.colActions')}</TableHead>
@@ -675,7 +715,7 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
           <TableBody>
             {rows.length === 0 ? (
               <TableEmptyState
-                colSpan={variant === 'pending' ? 7 : 6}
+                colSpan={variant === 'pending' ? 8 : 7}
                 icon={variant === 'pending' ? Bot : Rocket}
                 title={emptyTitle}
                 description={empty}
