@@ -14,7 +14,6 @@ import {
 import { Link } from 'react-router-dom'
 import { useTranslation } from '@/i18n'
 import { usePermissions } from '@/context/PermissionsContext'
-import { useTabParam } from '@/lib/use-tab-param'
 import {
   answerJob,
   cancelJob,
@@ -35,7 +34,6 @@ import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Dialog,
   DialogContent,
@@ -57,11 +55,6 @@ import { TableEmptyState } from '@/components/ui/table-empty-state'
 /** Statuses where something is still moving, so the list keeps polling. */
 const LIVE: JobStatus[] = ['pending', 'running', 'deploying']
 const POLL_MS = 5000
-
-/** Sub-tabs within the Agent tab. Kept on `?view=` so they don't collide with
- *  the page-level `?tab=` param, and stay shareable/refresh-proof. */
-const VIEWS = ['jobs', 'deployments'] as const
-type View = (typeof VIEWS)[number]
 
 type BadgeVariant = 'default' | 'secondary' | 'destructive' | 'outline'
 
@@ -117,6 +110,24 @@ function PrLink({ number, url }: { number: number | null; url: string | null }) 
   )
 }
 
+/** The shipped version of a job: merged commit, who deployed it and when.
+ *  Empty for jobs that were never deployed. */
+function DeployedCell({ dep }: { dep: Deployment | undefined }) {
+  if (!dep) return <span className="text-muted-foreground">—</span>
+  return (
+    <div className="whitespace-nowrap">
+      <div className="font-mono text-xs">
+        {dep.merge_sha ? dep.merge_sha.slice(0, 8) : (dep.version_label ?? '—')}
+      </div>
+      <div className="text-xs text-muted-foreground">
+        {[dep.deployed_by_name, fmt(dep.finished_at ?? dep.created_at)]
+          .filter(Boolean)
+          .join(' · ')}
+      </div>
+    </div>
+  )
+}
+
 /** Banner shown when the pipeline can't run yet, with a link to the fix. */
 function SetupNotice({ config }: { config: DevConfig }) {
   const { t } = useTranslation()
@@ -159,7 +170,6 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const [view, setView] = useTabParam<View>(VIEWS, 'jobs', 'view')
   const [newOpen, setNewOpen] = useState(false)
   const [prompt, setPrompt] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -205,6 +215,16 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
       deployments.some((d) => d.status === 'pending' || d.status === 'merging' || d.status === 'deploying'),
     [jobs, deployments],
   )
+  /** Newest deployment per job, so a job row can show the version it shipped.
+   *  The list arrives newest-first, so the first hit for a job wins. */
+  const depByJob = useMemo(() => {
+    const map = new Map<number, Deployment>()
+    for (const d of deployments) {
+      if (d.job_id !== null && !map.has(d.job_id)) map.set(d.job_id, d)
+    }
+    return map
+  }, [deployments])
+
   useEffect(() => {
     if (!hasLive) return
     const id = setInterval(() => void refresh(), POLL_MS)
@@ -271,33 +291,22 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
 
       {config && <SetupNotice config={config} />}
 
-      {/* ── Jobs / Deployed versions ────────────────────────────────────── */}
-      <Tabs value={view} onValueChange={(v) => setView(v as View)} className="space-y-3">
-        {/* Tab strip and the actions share one row — the actions apply to both. */}
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <TabsList>
-            <TabsTrigger value="jobs">
-              {t('agent.jobsTitle')} ({jobs.length})
-            </TabsTrigger>
-            <TabsTrigger value="deployments">
-              {t('agent.deploymentsTitle')} ({deployments.length})
-            </TabsTrigger>
-          </TabsList>
-          <div className="flex items-center gap-2">
-            <Button type="button" variant="outline" size="sm" onClick={() => void refresh()}>
-              <RefreshCw className="mr-2 h-4 w-4" />
-              {t('development.refresh')}
+      {/* ── Jobs ────────────────────────────────────────────────────────── */}
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <Button type="button" variant="outline" size="sm" onClick={() => void refresh()}>
+            <RefreshCw className="mr-2 h-4 w-4" />
+            {t('development.refresh')}
+          </Button>
+          {canRun && (
+            <Button type="button" size="sm" onClick={() => setNewOpen(true)}>
+              <Plus className="mr-2 h-4 w-4" />
+              {t('agent.newJob')}
             </Button>
-            {canRun && (
-              <Button type="button" size="sm" onClick={() => setNewOpen(true)}>
-                <Plus className="mr-2 h-4 w-4" />
-                {t('agent.newJob')}
-              </Button>
-            )}
-          </div>
+          )}
         </div>
 
-        <TabsContent value="jobs" className="rounded-lg border">
+        <div className="rounded-lg border">
           <Table>
             <TableHeader>
               <TableRow>
@@ -305,6 +314,7 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
                 <TableHead>{t('agent.colAgent')}</TableHead>
                 <TableHead>{t('agent.colStatus')}</TableHead>
                 <TableHead>{t('agent.colPr')}</TableHead>
+                <TableHead>{t('agent.colDeployed')}</TableHead>
                 <TableHead>{t('agent.colCreated')}</TableHead>
                 <TableHead className="text-right">{t('development.colActions')}</TableHead>
               </TableRow>
@@ -312,7 +322,7 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
             <TableBody>
               {jobs.length === 0 ? (
                 <TableEmptyState
-                  colSpan={6}
+                  colSpan={7}
                   icon={Bot}
                   title={t('agent.jobsEmptyTitle')}
                   description={t('agent.jobsEmpty')}
@@ -351,6 +361,9 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
                     </TableCell>
                     <TableCell>
                       <PrLink number={job.pr_number} url={job.pr_url} />
+                    </TableCell>
+                    <TableCell>
+                      <DeployedCell dep={depByJob.get(job.id)} />
                     </TableCell>
                     <TableCell className="whitespace-nowrap text-muted-foreground">
                       {fmt(job.created_at)}
@@ -421,63 +434,8 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
               )}
             </TableBody>
           </Table>
-        </TabsContent>
-
-        <TabsContent value="deployments" className="rounded-lg border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>{t('agent.colVersion')}</TableHead>
-                <TableHead>{t('agent.colChange')}</TableHead>
-                <TableHead>{t('agent.colStatus')}</TableHead>
-                <TableHead>{t('agent.colBy')}</TableHead>
-                <TableHead>{t('agent.colDeployedAt')}</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {deployments.length === 0 ? (
-                <TableEmptyState
-                  colSpan={5}
-                  icon={Rocket}
-                  title={t('agent.deploymentsEmptyTitle')}
-                  description={t('agent.deploymentsEmpty')}
-                />
-              ) : (
-                deployments.map((d) => (
-                  <TableRow key={d.id}>
-                    <TableCell>
-                      <PrLink number={d.pr_number} url={d.pr_url} />
-                      {d.merge_sha && (
-                        <div className="font-mono text-xs text-muted-foreground">
-                          {d.merge_sha.slice(0, 8)}
-                        </div>
-                      )}
-                    </TableCell>
-                    <TableCell className="max-w-sm">
-                      <div className="truncate">{d.job_title ?? '—'}</div>
-                      {d.error && <div className="truncate text-xs text-destructive">{d.error}</div>}
-                    </TableCell>
-                    <TableCell>
-                      <Badge
-                        variant={d.status === 'failed' ? 'destructive' : 'secondary'}
-                        className={d.status === 'deployed' ? 'bg-green-600 hover:bg-green-600' : undefined}
-                      >
-                        {t(`agent.deployStatus_${d.status}`)}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="whitespace-nowrap text-muted-foreground">
-                      {d.deployed_by_name ?? '—'}
-                    </TableCell>
-                    <TableCell className="whitespace-nowrap text-muted-foreground">
-                      {fmt(d.finished_at ?? d.created_at)}
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </TabsContent>
-      </Tabs>
+        </div>
+      </div>
 
       {/* ── New job ─────────────────────────────────────────────────────── */}
       <Dialog open={newOpen} onOpenChange={setNewOpen}>

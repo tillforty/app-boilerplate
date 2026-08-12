@@ -163,12 +163,12 @@ export interface Dictionary {
     | 'check_pull_request' | 'check_merge' | 'check_runner' | 'check_deploy',
     string
   >
-  /** Development › Agent — automated coding jobs and deployment history. */
+  /** Development › Agent — automated coding jobs and the versions they shipped. */
   agent: Record<
     | 'newJob' | 'newJobHint' | 'titleGenerated'
     | 'prompt' | 'promptPlaceholder' | 'start' | 'starting'
-    | 'jobsTitle' | 'jobsEmpty' | 'jobsEmptyTitle'
-    | 'colJob' | 'colAgent' | 'colStatus' | 'colPr' | 'colCreated'
+    | 'jobsEmpty' | 'jobsEmptyTitle'
+    | 'colJob' | 'colAgent' | 'colStatus' | 'colPr' | 'colDeployed' | 'colCreated'
     | 'status_pending' | 'status_running' | 'status_answer_pending'
     | 'status_deployment_ready' | 'status_deploying' | 'status_deployed'
     | 'status_failed' | 'status_cancelled'
@@ -176,10 +176,6 @@ export interface Dictionary {
     | 'answer' | 'answerTitle' | 'answerHint' | 'yourAnswer' | 'sendAnswer' | 'answerFailed'
     | 'deploy' | 'deployDisabled' | 'deployFailed'
     | 'retry' | 'retryFailed' | 'cancelFailed'
-    | 'deploymentsTitle' | 'deploymentsEmpty' | 'deploymentsEmptyTitle'
-    | 'colVersion' | 'colChange' | 'colBy' | 'colDeployedAt'
-    | 'deployStatus_pending' | 'deployStatus_merging' | 'deployStatus_deploying'
-    | 'deployStatus_deployed' | 'deployStatus_failed'
     | 'timeline' | 'log' | 'openPr' | 'close'
     | 'loadFailed' | 'createFailed'
     | 'setupNoRepo' | 'setupNoKey' | 'setupNoAgent' | 'setupNoRunner' | 'setupLink',
@@ -583,13 +579,13 @@ export const en: Dictionary = {
     promptPlaceholder: 'e.g. Add a CSV export button to the customers table.',
     start: 'Start job',
     starting: 'Starting…',
-    jobsTitle: 'Jobs',
     jobsEmpty: 'Jobs you start will appear here with their progress.',
     jobsEmptyTitle: 'No jobs yet',
     colJob: 'Job',
     colAgent: 'Agent',
     colStatus: 'Status',
     colPr: 'Pull request',
+    colDeployed: 'Deployed version',
     colCreated: 'Created',
     status_pending: 'Pending',
     status_running: 'Building',
@@ -613,18 +609,6 @@ export const en: Dictionary = {
     retry: 'Retry',
     retryFailed: 'Failed to retry the job',
     cancelFailed: 'Failed to cancel the job',
-    deploymentsTitle: 'Deployed versions',
-    deploymentsEmpty: 'Every version you deploy is recorded here.',
-    deploymentsEmptyTitle: 'Nothing deployed yet',
-    colVersion: 'Version',
-    colChange: 'Change',
-    colBy: 'Deployed by',
-    colDeployedAt: 'When',
-    deployStatus_pending: 'Queued',
-    deployStatus_merging: 'Merging',
-    deployStatus_deploying: 'Deploying',
-    deployStatus_deployed: 'Deployed',
-    deployStatus_failed: 'Failed',
     timeline: 'Timeline',
     log: 'Log',
     openPr: 'Open pull request',
