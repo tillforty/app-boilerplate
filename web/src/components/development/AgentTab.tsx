@@ -16,6 +16,8 @@ import { useTranslation } from '@/i18n'
 import { usePermissions } from '@/context/PermissionsContext'
 import { useTabParam } from '@/lib/use-tab-param'
 import {
+  DEPLOYMENT_IN_PROGRESS,
+  JOB_IN_PROGRESS,
   answerJob,
   cancelJob,
   createJob,
@@ -54,8 +56,6 @@ import {
 } from '@/components/ui/table'
 import { TableEmptyState } from '@/components/ui/table-empty-state'
 
-/** Statuses where something is still moving, so the list keeps polling. */
-const LIVE: JobStatus[] = ['pending', 'running', 'deploying']
 const POLL_MS = 5000
 
 /** Sub-tabs within the Agent tab. Kept on `?view=` so they don't collide with
@@ -92,7 +92,11 @@ function fmt(dt: string | null): string {
 function StatusBadge({ status }: { status: JobStatus }) {
   const { t } = useTranslation()
   return (
-    <Badge variant={STATUS_VARIANT[status]} className={STATUS_CLASS[status]}>
+    <Badge
+      variant={STATUS_VARIANT[status]}
+      className={STATUS_CLASS[status]}
+      loading={JOB_IN_PROGRESS.includes(status)}
+    >
       {t(`agent.status_${status}`)}
     </Badge>
   )
@@ -201,8 +205,8 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
   // Poll only while something is actually in flight — no busy-wait on an idle board.
   const hasLive = useMemo(
     () =>
-      jobs.some((j) => LIVE.includes(j.status)) ||
-      deployments.some((d) => d.status === 'pending' || d.status === 'merging' || d.status === 'deploying'),
+      jobs.some((j) => JOB_IN_PROGRESS.includes(j.status)) ||
+      deployments.some((d) => DEPLOYMENT_IN_PROGRESS.includes(d.status)),
     [jobs, deployments],
   )
   useEffect(() => {
@@ -302,6 +306,7 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
             <TableHeader>
               <TableRow>
                 <TableHead>{t('agent.colJob')}</TableHead>
+                <TableHead>{t('agent.colStartedBy')}</TableHead>
                 <TableHead>{t('agent.colAgent')}</TableHead>
                 <TableHead>{t('agent.colStatus')}</TableHead>
                 <TableHead>{t('agent.colPr')}</TableHead>
@@ -312,7 +317,7 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
             <TableBody>
               {jobs.length === 0 ? (
                 <TableEmptyState
-                  colSpan={6}
+                  colSpan={7}
                   icon={Bot}
                   title={t('agent.jobsEmptyTitle')}
                   description={t('agent.jobsEmpty')}
@@ -337,11 +342,9 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
                       {job.error && (
                         <div className="truncate text-xs text-destructive">{job.error}</div>
                       )}
-                      {job.created_by_name && (
-                        <div className="truncate text-xs text-muted-foreground">
-                          {job.created_by_name}
-                        </div>
-                      )}
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap text-muted-foreground">
+                      {job.created_by_name ?? '—'}
                     </TableCell>
                     <TableCell className="whitespace-nowrap text-muted-foreground">
                       {t(`agent.agent_${job.agent}`)}
@@ -400,20 +403,22 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
                             {t('agent.retry')}
                           </Button>
                         )}
-                        {LIVE.includes(job.status) && job.status !== 'deploying' && canRun && (
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="ghost"
-                            disabled={busyId === job.id}
-                            onClick={() =>
-                              void act(job.id, () => cancelJob(job.id), t('agent.cancelFailed'))
-                            }
-                          >
-                            <Ban className="mr-2 h-4 w-4" />
-                            {t('common.cancel')}
-                          </Button>
-                        )}
+                        {JOB_IN_PROGRESS.includes(job.status) &&
+                          job.status !== 'deploying' &&
+                          canRun && (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              disabled={busyId === job.id}
+                              onClick={() =>
+                                void act(job.id, () => cancelJob(job.id), t('agent.cancelFailed'))
+                              }
+                            >
+                              <Ban className="mr-2 h-4 w-4" />
+                              {t('common.cancel')}
+                            </Button>
+                          )}
                       </div>
                     </TableCell>
                   </TableRow>
@@ -461,6 +466,7 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
                       <Badge
                         variant={d.status === 'failed' ? 'destructive' : 'secondary'}
                         className={d.status === 'deployed' ? 'bg-green-600 hover:bg-green-600' : undefined}
+                        loading={DEPLOYMENT_IN_PROGRESS.includes(d.status)}
                       >
                         {t(`agent.deployStatus_${d.status}`)}
                       </Badge>
@@ -559,7 +565,14 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
           <DialogHeader>
             <DialogTitle>{detail?.title}</DialogTitle>
             <DialogDescription>
-              {detail && `${t(`agent.agent_${detail.agent}`)} · ${t(`agent.status_${detail.status}`)}`}
+              {detail &&
+                [
+                  t(`agent.agent_${detail.agent}`),
+                  t(`agent.status_${detail.status}`),
+                  detail.created_by_name && `${t('agent.startedBy')} ${detail.created_by_name}`,
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
             </DialogDescription>
           </DialogHeader>
           <div className="max-h-[60vh] space-y-4 overflow-y-auto">

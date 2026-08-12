@@ -1,5 +1,6 @@
 import * as React from "react"
 import { cva, type VariantProps } from "class-variance-authority"
+import { Loader2 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 
@@ -25,11 +26,22 @@ const badgeVariants = cva(
 
 export interface BadgeProps
   extends React.HTMLAttributes<HTMLDivElement>,
-    VariantProps<typeof badgeVariants> {}
+    VariantProps<typeof badgeVariants> {
+  /** Marks a label as "still working" (Building, Deploying, Merging, …): adds a
+   *  spinner so any in-progress state reads as live without extra markup. */
+  loading?: boolean
+}
 
-function Badge({ className, variant, ...props }: BadgeProps) {
+function Badge({ className, variant, loading, children, ...props }: BadgeProps) {
   return (
-    <div className={cn(badgeVariants({ variant }), className)} {...props} />
+    <div
+      className={cn(badgeVariants({ variant }), loading && "gap-1", className)}
+      aria-busy={loading || undefined}
+      {...props}
+    >
+      {loading && <Loader2 className="h-3 w-3 shrink-0 animate-spin" aria-hidden="true" />}
+      {children}
+    </div>
   )
 }
 

@@ -104,6 +104,9 @@ export default function ComponentsPage() {
               <Badge variant="secondary">Secondary</Badge>
               <Badge variant="outline">Outline</Badge>
               <Badge variant="destructive">Destructive</Badge>
+              <Badge variant="secondary" loading>
+                In progress
+              </Badge>
             </div>
             <Separator />
             <TooltipProvider>

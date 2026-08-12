@@ -168,7 +168,8 @@ export interface Dictionary {
     | 'newJob' | 'newJobHint' | 'titleGenerated'
     | 'prompt' | 'promptPlaceholder' | 'start' | 'starting'
     | 'jobsTitle' | 'jobsEmpty' | 'jobsEmptyTitle'
-    | 'colJob' | 'colAgent' | 'colStatus' | 'colPr' | 'colCreated'
+    | 'colJob' | 'colAgent' | 'colStatus' | 'colPr' | 'colCreated' | 'colStartedBy'
+    | 'startedBy'
     | 'status_pending' | 'status_running' | 'status_answer_pending'
     | 'status_deployment_ready' | 'status_deploying' | 'status_deployed'
     | 'status_failed' | 'status_cancelled'
@@ -591,6 +592,8 @@ export const en: Dictionary = {
     colStatus: 'Status',
     colPr: 'Pull request',
     colCreated: 'Created',
+    colStartedBy: 'Started by',
+    startedBy: 'started by',
     status_pending: 'Pending',
     status_running: 'Building',
     status_answer_pending: 'Answer pending',

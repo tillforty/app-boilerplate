@@ -579,8 +579,12 @@ async def generate_title(prompt: str) -> str:
     return title[:120] or fallback
 
 
-_JOB_SELECT = """
-    SELECT j.*, NULLIF(TRIM(COALESCE(u.name, '') || ' ' || COALESCE(u.surname, '')), '') AS created_by_name
+# Who started the job. The email is the fallback so the row still names someone
+# when a profile has no name filled in; NULL only means the user was deleted.
+_USER_LABEL = "COALESCE(NULLIF(TRIM(COALESCE({u}.name, '') || ' ' || COALESCE({u}.surname, '')), ''), {u}.email)"
+
+_JOB_SELECT = f"""
+    SELECT j.*, {_USER_LABEL.format(u='u')} AS created_by_name
     FROM dev_jobs j
     LEFT JOIN users u ON u.id = j.created_by
 """
@@ -773,9 +777,9 @@ class Deployment(BaseModel):
     finished_at: datetime | None
 
 
-_DEPLOYMENT_SELECT = """
+_DEPLOYMENT_SELECT = f"""
     SELECT d.*, j.title AS job_title,
-           NULLIF(TRIM(COALESCE(u.name, '') || ' ' || COALESCE(u.surname, '')), '') AS deployed_by_name
+           {_USER_LABEL.format(u='u')} AS deployed_by_name
     FROM dev_deployments d
     LEFT JOIN dev_jobs j ON j.id = d.job_id
     LEFT JOIN users u ON u.id = d.deployed_by
