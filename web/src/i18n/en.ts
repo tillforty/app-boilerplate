@@ -142,8 +142,8 @@ export interface Dictionary {
   development: Record<
     | 'title' | 'subtitle' | 'tabAgent' | 'tabIssues' | 'tabSupport'
     | 'comingSoon' | 'comingSoonHint' | 'noPermission'
-    | 'issuesEmpty' | 'issuesError' | 'refresh'
-    | 'colIssue' | 'colLevel' | 'colEvents' | 'colUsers' | 'colLastSeen' | 'open'
+    | 'issuesEmpty' | 'issuesEmptyTitle' | 'issuesCount' | 'issuesError' | 'refresh'
+    | 'colIssue' | 'colLevel' | 'colEvents' | 'colUsers' | 'colLastSeen' | 'colActions' | 'open'
     | 'setupTitle' | 'setupIntro' | 'openGlitchtip' | 'redeployNote'
     | 'step1Title' | 'step1Desc' | 'step2Title' | 'step2Desc'
     | 'step3Title' | 'step3Desc' | 'step4Title' | 'step4Desc',
@@ -465,7 +465,9 @@ export const en: Dictionary = {
     comingSoon: 'Coming soon',
     comingSoonHint: 'This tool is on the way.',
     noPermission: 'You don’t have permission to view this.',
-    issuesEmpty: 'No open issues. 🎉',
+    issuesEmpty: 'Errors captured from the app will show up here.',
+    issuesEmptyTitle: 'No open issues',
+    issuesCount: '{count} open issue(s)',
     issuesError: 'Failed to load issues',
     refresh: 'Refresh',
     colIssue: 'Issue',
@@ -473,6 +475,7 @@ export const en: Dictionary = {
     colEvents: 'Events',
     colUsers: 'Users',
     colLastSeen: 'Last seen',
+    colActions: 'Actions',
     open: 'Open',
     setupTitle: 'Set up live error tracking',
     setupIntro: 'Complete these steps to see errors here live:',

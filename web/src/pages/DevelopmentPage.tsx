@@ -11,7 +11,17 @@ import {
 } from '@/lib/development'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
+import { TableEmptyState } from '@/components/ui/table-empty-state'
 
 const TABS = ['agent', 'issues', 'support'] as const
 type Tab = (typeof TABS)[number]
@@ -102,74 +112,79 @@ function SetupChecklist({ setup }: { setup: DevSetupStatus }) {
   )
 }
 
-/** The live issue list. */
+/** The live issue list — same table styling as the app's other data tables. */
 function IssuesList({ issues, onRefresh }: { issues: Issue[]; onRefresh: () => void }) {
   const { t } = useTranslation()
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle className="text-base">{t('development.tabIssues')}</CardTitle>
-        <Button type="button" variant="ghost" size="sm" onClick={onRefresh}>
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-muted-foreground">
+          {t('development.issuesCount', { count: String(issues.length) })}
+        </p>
+        <Button type="button" variant="outline" size="sm" onClick={onRefresh}>
           <RefreshCw className="mr-2 h-4 w-4" />
           {t('development.refresh')}
         </Button>
-      </CardHeader>
-      <CardContent>
-        {issues.length === 0 ? (
-          <p className="py-8 text-center text-sm text-muted-foreground">
-            {t('development.issuesEmpty')}
-          </p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b text-left text-xs uppercase text-muted-foreground">
-                  <th className="py-2 pr-4 font-medium">{t('development.colIssue')}</th>
-                  <th className="py-2 pr-4 font-medium">{t('development.colLevel')}</th>
-                  <th className="py-2 pr-4 text-right font-medium">{t('development.colEvents')}</th>
-                  <th className="py-2 pr-4 text-right font-medium">{t('development.colUsers')}</th>
-                  <th className="py-2 pr-4 font-medium">{t('development.colLastSeen')}</th>
-                  <th className="py-2 font-medium" />
-                </tr>
-              </thead>
-              <tbody>
-                {issues.map((it) => (
-                  <tr key={it.id} className="border-b last:border-0 align-top">
-                    <td className="py-2 pr-4">
-                      <div className="font-medium">{it.title}</div>
-                      {it.culprit && (
-                        <div className="text-xs text-muted-foreground">{it.culprit}</div>
-                      )}
-                    </td>
-                    <td className={`py-2 pr-4 font-medium ${levelClass(it.level)}`}>
+      </div>
+      <div className="rounded-lg border">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>{t('development.colIssue')}</TableHead>
+              <TableHead>{t('development.colLevel')}</TableHead>
+              <TableHead className="text-right">{t('development.colEvents')}</TableHead>
+              <TableHead className="text-right">{t('development.colUsers')}</TableHead>
+              <TableHead>{t('development.colLastSeen')}</TableHead>
+              <TableHead className="text-right">{t('development.colActions')}</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {issues.length === 0 ? (
+              <TableEmptyState
+                colSpan={6}
+                icon={CheckCircle2}
+                title={t('development.issuesEmptyTitle')}
+                description={t('development.issuesEmpty')}
+              />
+            ) : (
+              issues.map((it) => (
+                <TableRow key={it.id}>
+                  <TableCell className="max-w-md">
+                    <div className="truncate font-medium">{it.title}</div>
+                    {it.culprit && (
+                      <div className="truncate text-xs text-muted-foreground">{it.culprit}</div>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="outline" className={levelClass(it.level)}>
                       {it.level ?? '—'}
-                    </td>
-                    <td className="py-2 pr-4 text-right tabular-nums">{it.count}</td>
-                    <td className="py-2 pr-4 text-right tabular-nums">{it.user_count}</td>
-                    <td className="py-2 pr-4 whitespace-nowrap text-muted-foreground">
-                      {fmt(it.last_seen)}
-                    </td>
-                    <td className="py-2">
-                      {it.web_url && (
-                        <a
-                          href={it.web_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center text-primary hover:underline"
-                        >
-                          {t('development.open')}
-                          <ExternalLink className="ml-1 h-3.5 w-3.5" />
-                        </a>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </CardContent>
-    </Card>
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">{it.count}</TableCell>
+                  <TableCell className="text-right tabular-nums">{it.user_count}</TableCell>
+                  <TableCell className="whitespace-nowrap text-muted-foreground">
+                    {fmt(it.last_seen)}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    {it.web_url && (
+                      <a
+                        href={it.web_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center text-primary hover:underline"
+                      >
+                        {t('development.open')}
+                        <ExternalLink className="ml-1 h-3.5 w-3.5" />
+                      </a>
+                    )}
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </div>
+    </div>
   )
 }
 
