@@ -408,6 +408,8 @@ export const lt: Dictionary = {
     colPr: 'Pull request',
     colDeployed: 'Įdiegta versija',
     colCreated: 'Sukurta',
+    colStartedBy: 'Pradėjo',
+    startedBy: 'pradėjo',
     status_pending: 'Laukia',
     status_running: 'Kuriama',
     status_answer_pending: 'Laukiama atsakymo',

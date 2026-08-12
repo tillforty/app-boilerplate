@@ -55,6 +55,10 @@ export type JobStatus =
   | 'failed'
   | 'cancelled'
 
+/** Statuses where the pipeline is still working — the list keeps polling and the
+ *  status label spins. Kept here so every view agrees on what "in progress" is. */
+export const JOB_IN_PROGRESS: JobStatus[] = ['pending', 'running', 'deploying']
+
 /** Which coding CLI is bound, per Settings › App › AI functions. */
 export interface AgentInfo {
   configured: boolean
@@ -133,6 +137,11 @@ export interface JobDetail extends Job {
   events: JobEvent[]
 }
 
+export type DeploymentStatus = 'pending' | 'merging' | 'deploying' | 'deployed' | 'failed'
+
+/** Deployment counterpart of {@link JOB_IN_PROGRESS}. */
+export const DEPLOYMENT_IN_PROGRESS: DeploymentStatus[] = ['pending', 'merging', 'deploying']
+
 export interface Deployment {
   id: number
   job_id: number | null
@@ -141,7 +150,7 @@ export interface Deployment {
   pr_url: string | null
   merge_sha: string | null
   version_label: string | null
-  status: 'pending' | 'merging' | 'deploying' | 'deployed' | 'failed'
+  status: DeploymentStatus
   error: string | null
   deployed_by_name: string | null
   created_at: string
