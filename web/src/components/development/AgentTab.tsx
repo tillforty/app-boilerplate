@@ -107,21 +107,22 @@ function JobStatusBadge({ status }: { status: JobStatus }) {
   )
 }
 
-/** PR number as a label that links straight to GitHub. */
+/** PR number as a neutral grey label — the same pill shape as the status column,
+ *  so the cell reads as a value rather than loose text. It links straight to
+ *  GitHub whenever we know the URL. */
 function PrLink({ number, url }: { number: number | null; url: string | null }) {
   if (number === null) return <span className="text-muted-foreground">—</span>
-  const label = `#${number}`
-  if (!url) return <span className="tabular-nums">{label}</span>
+  const label = (
+    <Badge variant="secondary" className="gap-1 font-medium tabular-nums">
+      <GitPullRequest className="h-3.5 w-3.5 shrink-0" />
+      {`#${number}`}
+      {url && <ExternalLink className="h-3 w-3 shrink-0" />}
+    </Badge>
+  )
+  if (!url) return label
   return (
-    <a
-      href={url}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="inline-flex items-center gap-1 text-primary hover:underline"
-    >
-      <GitPullRequest className="h-3.5 w-3.5" />
+    <a href={url} target="_blank" rel="noopener noreferrer" className="inline-flex">
       {label}
-      <ExternalLink className="h-3 w-3" />
     </a>
   )
 }
