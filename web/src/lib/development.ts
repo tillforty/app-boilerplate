@@ -159,6 +159,9 @@ export const getJob = (id: number) => api.get<JobDetail>(`/development/jobs/${id
 /** The title is written by the operating agent from the prompt, not supplied. */
 export const createJob = (body: { prompt: string }) =>
   api.post<Job>('/development/jobs', body)
+/** Reword a job that hasn't started. Pending only; the title is regenerated. */
+export const updateJobPrompt = (id: number, prompt: string) =>
+  api.patch<Job>(`/development/jobs/${id}`, { prompt })
 export const answerJob = (id: number, answer: string) =>
   api.post<Job>(`/development/jobs/${id}/answer`, { answer })
 export const retryJob = (id: number) => api.post<Job>(`/development/jobs/${id}/retry`, {})

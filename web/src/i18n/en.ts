@@ -174,6 +174,7 @@ export interface Dictionary {
     | 'status_failed' | 'status_cancelled'
     | 'agent_claude_code' | 'agent_codex'
     | 'answer' | 'answerTitle' | 'answerHint' | 'yourAnswer' | 'sendAnswer' | 'answerFailed'
+    | 'editTitle' | 'editHint' | 'editFailed'
     | 'deploy' | 'deployDisabled' | 'deployFailed'
     | 'retry' | 'retryFailed' | 'cancelFailed'
     | 'deploymentsTitle' | 'deploymentsEmpty' | 'deploymentsEmptyTitle'
@@ -553,7 +554,7 @@ export const en: Dictionary = {
     deployEnabledHint:
       'When on, Deploy merges the pull request and rebuilds this server. Leave off to merge manually instead.',
     checkoutPath: 'Server checkout path',
-    checkoutPathHint: 'The directory on this server that is pulled and rebuilt when you deploy.',
+    checkoutPathHint: 'Set by APP_CHECKOUT_PATH in .env — the container mounts this exact path, so it can only be changed there followed by ./start.sh.',
     runnerOnline: 'Agent runner online',
     runnerOffline: 'Agent runner offline',
     runnerOfflineHint: 'Set AGENT_ENABLED=true in .env and run ./start.sh.',
@@ -601,6 +602,9 @@ export const en: Dictionary = {
     status_cancelled: 'Cancelled',
     agent_claude_code: 'Claude Code',
     agent_codex: 'OpenAI Codex',
+    editTitle: 'Edit job',
+    editHint: 'The job hasn’t started yet, so you can still reword it. The title is regenerated.',
+    editFailed: 'Failed to save the prompt',
     answer: 'Answer',
     answerTitle: 'The agent has a question',
     answerHint: 'Answer it and the job continues from where it stopped.',

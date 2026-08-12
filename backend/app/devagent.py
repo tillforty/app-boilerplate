@@ -22,6 +22,7 @@ Canonical DDL: migrations/0012_dev_agent.sql.
 """
 import asyncio
 import json
+import os
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -35,6 +36,11 @@ from .roles import require_permission
 router = APIRouter(prefix="/development", tags=["development"])
 
 GITHUB_API = "https://api.github.com"
+
+# Where the Deploy button pulls and rebuilds. Env-only on purpose: docker-compose
+# bind-mounts this exact path into the runner, so a value edited in the UI could
+# name a directory the container cannot even see. Change it in .env, then redeploy.
+CHECKOUT_PATH = os.environ.get("APP_CHECKOUT_PATH", "/opt/app-boilerplate")
 TOKEN_SECRET_NAME = "dev_agent:github_token"
 
 # The runner heartbeats on every poll; allow a few missed beats before we call
@@ -206,7 +212,6 @@ class DevConfig(BaseModel):
 class DevConfigUpdate(BaseModel):
     repo_full_name: str | None = Field(default=None, max_length=200)
     base_branch: str | None = Field(default=None, min_length=1, max_length=200)
-    checkout_path: str | None = Field(default=None, min_length=1, max_length=500)
     deploy_enabled: bool | None = None
     # Write-only: non-empty stores/rotates the vault token, blank/None keeps it.
     github_token: str | None = None
@@ -245,7 +250,7 @@ async def _to_config(row) -> DevConfig:
     return DevConfig(
         repo_full_name=row["repo_full_name"],
         base_branch=row["base_branch"],
-        checkout_path=row["checkout_path"],
+        checkout_path=CHECKOUT_PATH,
         deploy_enabled=row["deploy_enabled"],
         has_token=row["has_token"],
         validation=ValidationResult(**validation) if validation else None,
@@ -279,7 +284,6 @@ async def update_config(
             "Repository must be in 'owner/name' form, e.g. tillforty/app-boilerplate.",
         )
     base_branch = existing["base_branch"] if body.base_branch is None else body.base_branch.strip()
-    checkout_path = existing["checkout_path"] if body.checkout_path is None else body.checkout_path.strip()
     deploy_enabled = existing["deploy_enabled"] if body.deploy_enabled is None else body.deploy_enabled
 
     new_token = (body.github_token or "").strip()
@@ -288,7 +292,6 @@ async def update_config(
     revalidate = (
         repo != existing["repo_full_name"]
         or base_branch != existing["base_branch"]
-        or checkout_path != existing["checkout_path"]
         or bool(new_token)
         or body.clear_token
     )
@@ -298,17 +301,16 @@ async def update_config(
             row = await conn.fetchrow(
                 """
                 UPDATE dev_settings
-                SET repo_full_name = $1, base_branch = $2, checkout_path = $3,
-                    deploy_enabled = $4, has_token = $5,
-                    validation = CASE WHEN $6 THEN NULL ELSE validation END,
-                    validated_at = CASE WHEN $6 THEN NULL ELSE validated_at END,
+                SET repo_full_name = $1, base_branch = $2,
+                    deploy_enabled = $3, has_token = $4,
+                    validation = CASE WHEN $5 THEN NULL ELSE validation END,
+                    validated_at = CASE WHEN $5 THEN NULL ELSE validated_at END,
                     updated_at = now()
                 WHERE id = 1
                 RETURNING *
                 """,
                 repo,
                 base_branch,
-                checkout_path,
                 deploy_enabled,
                 has_token,
                 revalidate,
@@ -442,7 +444,7 @@ async def _run_validation(row) -> ValidationResult:
         remote = info.get("checkout_remote") or "unknown"
         docker_ok = bool(info.get("has_docker"))
         if not checkout_ok:
-            add("deploy", False, f"Checkout {row['checkout_path']} is not a git repository on the host.")
+            add("deploy", False, f"Checkout {CHECKOUT_PATH} is not a git repository on the host.")
         elif not docker_ok:
             add("deploy", False, "The runner has no access to the Docker socket, so it can't rebuild.")
         elif repo.lower() not in remote.lower():
@@ -452,7 +454,7 @@ async def _run_validation(row) -> ValidationResult:
                 f"Checkout remote ({remote}) doesn't match the configured repo — deploying would ship a different app.",
             )
         else:
-            add("deploy", True, f"{row['checkout_path']} tracks {remote} and Docker is reachable.")
+            add("deploy", True, f"{CHECKOUT_PATH} tracks {remote} and Docker is reachable.")
 
     return ValidationResult(ok=all(c.ok for c in checks), checks=checks)
 
@@ -510,6 +512,10 @@ class JobDetail(Job):
 
 
 class JobCreate(BaseModel):
+    prompt: str = Field(min_length=5)
+
+
+class JobUpdate(BaseModel):
     prompt: str = Field(min_length=5)
 
 
@@ -661,6 +667,55 @@ async def get_job(
         log=row["log"],
         events=[JobEvent(**dict(e)) for e in events],
     )
+
+
+@router.patch("/jobs/{job_id}", response_model=Job)
+async def update_job(
+    job_id: int,
+    body: JobUpdate,
+    _: UserOut = Depends(require_permission("development:run")),
+) -> Job:
+    """Reword a job that hasn't started yet. Pending only — once the agent has a
+    working tree, changing the brief underneath it would be meaningless."""
+    prompt = body.prompt.strip()
+    current = await db.get_pool().fetchrow("SELECT * FROM dev_jobs WHERE id = $1", job_id)
+    if current is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Job not found")
+    if current["status"] != "pending":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "Only a pending job can be edited."
+        )
+    if prompt == current["prompt"]:
+        return _to_job(await db.get_pool().fetchrow(f"{_JOB_SELECT} WHERE j.id = $1", job_id))
+
+    # Rename to match the new brief. Done before the transaction so a slow model
+    # doesn't hold the row lock the runner needs to claim work.
+    title = await generate_title(prompt)
+
+    async with db.get_pool().acquire() as conn:
+        async with conn.transaction():
+            # Re-check under the lock: the runner may have claimed it meanwhile.
+            row = await conn.fetchrow(
+                "SELECT status FROM dev_jobs WHERE id = $1 FOR UPDATE", job_id
+            )
+            if row is None:
+                raise HTTPException(status.HTTP_404_NOT_FOUND, "Job not found")
+            if row["status"] != "pending":
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    "The agent just started this job, so it can no longer be edited.",
+                )
+            await conn.execute(
+                "UPDATE dev_jobs SET prompt = $2, title = $3, updated_at = now() WHERE id = $1",
+                job_id,
+                prompt,
+                title,
+            )
+            await conn.execute(
+                "INSERT INTO dev_job_events (job_id, kind, message) VALUES ($1, 'edited', 'Prompt edited before the run started.')",
+                job_id,
+            )
+    return _to_job(await db.get_pool().fetchrow(f"{_JOB_SELECT} WHERE j.id = $1", job_id))
 
 
 @router.post("/jobs/{job_id}/answer", response_model=Job)

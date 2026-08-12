@@ -29,6 +29,7 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
 import traceback
 from datetime import datetime, timezone
 
@@ -46,6 +47,8 @@ POLL_INTERVAL = float(os.environ.get("AGENT_POLL_INTERVAL", "5"))
 AGENT_TIMEOUT = int(os.environ.get("AGENT_TIMEOUT", "1800"))
 DEPLOY_TIMEOUT = int(os.environ.get("AGENT_DEPLOY_TIMEOUT", "1800"))
 WORKSPACE = os.environ.get("AGENT_WORKSPACE", "/work")
+# Env-only, and bind-mounted at this same path by docker-compose.yml.
+CHECKOUT_PATH = os.environ.get("APP_CHECKOUT_PATH", "/opt/app-boilerplate")
 AGENT_USER = os.environ.get("AGENT_USER", "agent")
 
 # Image used for the detached deploy sibling. Defaults to this same image, which
@@ -109,6 +112,13 @@ def run(cmd: list[str], cwd: str | None = None, env: dict | None = None,
         return subprocess.CompletedProcess(
             cmd, 124, out, err + f"\n[timed out after {timeout}s]"
         )
+    except OSError as exc:
+        # A missing binary — or, easier to hit, a `cwd` that doesn't exist because
+        # the configured checkout path is wrong. Report it as an ordinary failed
+        # command: callers already handle non-zero, whereas an exception here used
+        # to escape all the way out and kill the heartbeat, making a mistyped path
+        # look like "the runner is offline" instead of "checkout not found".
+        return subprocess.CompletedProcess(cmd, 127, "", str(exc))
 
 
 def git(args: list[str], cwd: str, token: str | None = None, **kw) -> subprocess.CompletedProcess:
@@ -210,8 +220,7 @@ def probe_host(checkout_path: str) -> dict:
 async def heartbeat(pool, cache: dict) -> None:
     """Refresh dev_settings.runner_seen_at every poll; re-probe the host rarely
     (a `docker version` per 5s would be pure noise)."""
-    config = await load_config(pool)
-    checkout = config["checkout_path"] if config else "/opt/app-boilerplate"
+    checkout = CHECKOUT_PATH
     now = datetime.now(timezone.utc).timestamp()
     if now - cache.get("at", 0) > 60 or cache.get("path") != checkout:
         cache["info"] = probe_host(checkout)
@@ -221,6 +230,69 @@ async def heartbeat(pool, cache: dict) -> None:
         "UPDATE dev_settings SET runner_seen_at = now(), runner_info = $1::jsonb WHERE id = 1",
         json.dumps(cache["info"]),
     )
+
+
+async def _heartbeat_forever() -> None:
+    """Own pool, own event loop — see start_heartbeat_thread."""
+    pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=2)
+    cache: dict = {}
+    while True:
+        try:
+            await heartbeat(pool, cache)
+        except Exception:  # noqa: BLE001 — liveness must outlive any single failure
+            log("heartbeat error:\n" + traceback.format_exc())
+        await asyncio.sleep(POLL_INTERVAL)
+
+
+async def _deploy_forever() -> None:
+    """Own pool, own event loop — see start_deploy_thread."""
+    pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=2)
+    while True:
+        try:
+            await reconcile_deployments(pool)
+            dep = await claim_deployment(pool)
+            if dep is not None:
+                await run_deployment(pool, dep)
+                continue
+        except Exception:  # noqa: BLE001 — deploys must outlive any single failure
+            log("deploy worker error:\n" + traceback.format_exc())
+        await asyncio.sleep(POLL_INTERVAL)
+
+
+def start_deploy_thread() -> None:
+    """Deploy on its own thread so a build in progress can't stall a release.
+
+    Clicking Deploy used to do nothing visible whenever a job was running: the
+    work loop was blocked inside a coding CLI, so the queued deployment sat
+    unclaimed until the build finished — potentially the full AGENT_TIMEOUT.
+    Merging a PR and launching the rebuild sibling is independent of whatever the
+    agent is writing, so it gets its own worker. Claims use FOR UPDATE SKIP
+    LOCKED, so the two threads can never take the same row.
+    """
+    def worker() -> None:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(_deploy_forever())
+
+    threading.Thread(target=worker, name="deploy", daemon=True).start()
+
+
+def start_heartbeat_thread() -> None:
+    """Beat from a dedicated thread, independent of whatever the worker is doing.
+
+    The work loop drives the coding CLIs through *blocking* subprocess calls that
+    can hold the process for the whole AGENT_TIMEOUT. A heartbeat inside that
+    loop therefore stops for the entire build, and the app declares the runner
+    offline exactly while it is busiest — which also made the API refuse to queue
+    a deploy mid-job. Liveness gets its own thread so it can never be starved by
+    the work it is reporting on.
+    """
+    def worker() -> None:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(_heartbeat_forever())
+
+    threading.Thread(target=worker, name="heartbeat", daemon=True).start()
 
 
 # ── Prompt construction ──────────────────────────────────────────────────────
@@ -502,6 +574,128 @@ git -c credential.helper='!f(){ echo username=x-access-token; echo "password=$GH
 """
 
 
+CONFLICT_PROMPT = """\
+You are resolving a git merge conflict, nothing else.
+
+The branch `{branch}` was written to satisfy this request:
+
+--- ORIGINAL REQUEST ---
+{prompt}
+--- END REQUEST ---
+
+Meanwhile `{base}` moved on, and merging it in produced conflicts in:
+{files}
+
+Resolve every conflict so that BOTH intents survive: keep the change that landed
+on `{base}`, and keep this branch's work on top of it. Do not drop either side
+just to make the file parse, and do not "resolve" by reverting to one side unless
+the two genuinely describe the same change.
+
+Rules:
+- Remove every conflict marker (<<<<<<<, =======, >>>>>>>).
+- Change nothing beyond what the conflicts require.
+- Do NOT run git commands. The harness commits and pushes for you.
+"""
+
+
+async def resolve_conflicts(pool, dep, repo: str, token: str, base_branch: str) -> tuple[bool, str]:
+    """Merge the base branch into the PR branch, letting the coding agent settle
+    any conflicts, then push. Returns (resolved, detail).
+
+    Why this belongs to deploy: two jobs branched from the same commit are always
+    mergeable individually, and the first merge is what makes the second one
+    conflict. That only surfaces at deploy time, so the fix has to live here.
+    """
+    job_id = dep["job_id"]
+    if job_id is None:
+        return False, "Deployment has no job to rebuild from."
+    job = await pool.fetchrow("SELECT * FROM dev_jobs WHERE id = $1", job_id)
+    if job is None or not job["branch"]:
+        return False, "Job or branch is gone, so the conflict can't be resolved."
+
+    provider = "anthropic" if job["agent"] == "claude_code" else "openai"
+    api_key = await resolve_agent_key(pool, provider)
+    if not api_key:
+        return False, "No agent API key available to resolve the conflict."
+
+    branch = job["branch"]
+    workdir = os.path.join(WORKSPACE, f"conflict-{dep['id']}")
+    shutil.rmtree(workdir, ignore_errors=True)
+    os.makedirs(workdir, exist_ok=True)
+    shutil.chown(workdir, user=AGENT_USER, group=AGENT_USER)
+    try:
+        clone = git(["clone", "--branch", branch, f"https://github.com/{repo}.git", "."],
+                    cwd=workdir, token=token, timeout=600)
+        if clone.returncode != 0:
+            return False, "Could not clone the branch to resolve the conflict."
+        run(["chown", "-R", f"{AGENT_USER}:{AGENT_USER}", workdir], timeout=120)
+        git(["config", "user.email", "agent@tillforty.local"], cwd=workdir, timeout=30, user=AGENT_USER)
+        git(["config", "user.name", "Tillforty development agent"], cwd=workdir, timeout=30, user=AGENT_USER)
+
+        fetch = git(["fetch", "origin", base_branch], cwd=workdir, token=token, timeout=300)
+        if fetch.returncode != 0:
+            return False, f"Could not fetch {base_branch}."
+
+        merge = git(["merge", f"origin/{base_branch}", "--no-edit"], cwd=workdir,
+                    timeout=300, user=AGENT_USER)
+        if merge.returncode == 0:
+            # Base merged cleanly — the branch was merely stale, not conflicted.
+            push = git(["push", "origin", branch], cwd=workdir, token=token, timeout=600)
+            if push.returncode != 0:
+                return False, "Could not push the updated branch."
+            return True, f"Brought {branch} up to date with {base_branch}."
+
+        conflicted = [
+            ln.strip() for ln in
+            git(["diff", "--name-only", "--diff-filter=U"], cwd=workdir, timeout=60,
+                user=AGENT_USER).stdout.splitlines() if ln.strip()
+        ]
+        if not conflicted:
+            return False, "Merge failed but reported no conflicted files."
+
+        await event(pool, job_id, "conflict",
+                    f"Merge conflict in {len(conflicted)} file(s); asking the agent to resolve.")
+
+        prompt = CONFLICT_PROMPT.format(
+            branch=branch, base=base_branch, prompt=job["prompt"],
+            files="\n".join(f"- {f}" for f in conflicted),
+        )
+        if job["agent"] == "claude_code":
+            cmd = ["claude", *CLAUDE_ARGS]
+            env = {"ANTHROPIC_API_KEY": api_key}
+        else:
+            cmd = ["codex", *CODEX_ARGS]
+            env = {"OPENAI_API_KEY": api_key}
+        if job["model"]:
+            cmd += ["--model", job["model"]]
+        cmd.append(prompt)
+
+        proc = run(cmd, cwd=workdir, env=env, timeout=AGENT_TIMEOUT, user=AGENT_USER)
+        if proc.returncode != 0:
+            return False, f"The agent exited {proc.returncode} while resolving the conflict."
+
+        # Never ship a file that still carries markers, whatever the agent claims.
+        left = git(["diff", "--name-only", "--diff-filter=U"], cwd=workdir, timeout=60,
+                   user=AGENT_USER).stdout.strip()
+        grep = run(["grep", "-rlE", r"^(<{7}|={7}|>{7})( |$)", workdir, "--exclude-dir=.git"],
+                   timeout=120)
+        if left or grep.stdout.strip():
+            return False, "Conflict markers were still present after the agent ran."
+
+        git(["add", "-A"], cwd=workdir, timeout=120, user=AGENT_USER)
+        commit = git(["commit", "-m", f"Merge {base_branch} into {branch} (conflicts resolved by agent)"],
+                     cwd=workdir, timeout=120, user=AGENT_USER)
+        if commit.returncode != 0 and "nothing to commit" not in (commit.stdout + commit.stderr):
+            return False, "Could not commit the resolved merge."
+        push = git(["push", "origin", branch], cwd=workdir, token=token, timeout=600)
+        if push.returncode != 0:
+            return False, "Could not push the resolved branch."
+        await event(pool, job_id, "conflict", "Conflicts resolved and pushed.")
+        return True, f"Resolved conflicts in {len(conflicted)} file(s)."
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
+
+
 async def claim_deployment(pool):
     return await pool.fetchrow(
         """
@@ -579,10 +773,61 @@ async def run_deployment(pool, dep) -> None:
             )
             if merge.status_code != 200:
                 detail = merge.json().get("message", merge.text[:300]) if merge.text else merge.text
-                return await finish_deployment(
-                    pool, dep_id, job_id, False,
-                    f"GitHub refused to merge PR #{dep['pr_number']}: {detail}",
-                )
+                # A conflict here is the normal cost of two jobs branching from
+                # the same commit: whichever merges first strands the other. Send
+                # the agent back in to settle it, then merge again.
+                if "conflict" in detail.lower() or merge.status_code == 405:
+                    log(f"deployment {dep_id}: PR #{dep['pr_number']} conflicts — resolving")
+                    await pool.execute(
+                        "UPDATE dev_deployments SET error = $2 WHERE id = $1",
+                        dep_id, "Merge conflict — the agent is resolving it…",
+                    )
+                    resolved, why = await resolve_conflicts(
+                        pool, dep, repo, token, config["base_branch"]
+                    )
+                    if not resolved:
+                        return await finish_deployment(
+                            pool, dep_id, job_id, False,
+                            f"PR #{dep['pr_number']} has conflicts that couldn't be resolved: {why}",
+                        )
+                    # GitHub recomputes mergeability asynchronously after a push.
+                    merge = None
+                    for attempt in range(10):
+                        await asyncio.sleep(3)
+                        async with httpx.AsyncClient(timeout=30) as c:
+                            pr = await c.get(
+                                f"{GITHUB_API}/repos/{repo}/pulls/{dep['pr_number']}",
+                                headers=gh_headers(token),
+                            )
+                        if pr.status_code == 200 and pr.json().get("mergeable") is True:
+                            merge = await gh_put(
+                                token, f"/repos/{repo}/pulls/{dep['pr_number']}/merge",
+                                {
+                                    "merge_method": os.environ.get("AGENT_MERGE_METHOD", "squash"),
+                                    "commit_title":
+                                        f"{dep['version_label']}: {job_title or 'agent change'}"[:250],
+                                },
+                            )
+                            break
+                    if merge is None or merge.status_code != 200:
+                        again = (
+                            merge.json().get("message", "")
+                            if merge is not None and merge.text else "still not mergeable"
+                        )
+                        return await finish_deployment(
+                            pool, dep_id, job_id, False,
+                            f"PR #{dep['pr_number']} still wouldn't merge after resolving: {again}",
+                        )
+                    await pool.execute(
+                        "UPDATE dev_deployments SET error = NULL WHERE id = $1", dep_id
+                    )
+                    if job_id is not None:
+                        await event(pool, job_id, "conflict", why)
+                else:
+                    return await finish_deployment(
+                        pool, dep_id, job_id, False,
+                        f"GitHub refused to merge PR #{dep['pr_number']}: {detail}",
+                    )
             merge_sha = merge.json().get("sha")
         await pool.execute(
             "UPDATE dev_deployments SET merge_sha = $2, status = 'deploying' WHERE id = $1",
@@ -591,7 +836,7 @@ async def run_deployment(pool, dep) -> None:
         if job_id is not None:
             await event(pool, job_id, "merged", f"Merged PR #{dep['pr_number']} ({(merge_sha or '')[:8]}).")
 
-        checkout = config["checkout_path"]
+        checkout = CHECKOUT_PATH
         container_name = f"tillforty-deploy-{dep_id}"
         run(["docker", "rm", "-f", container_name], timeout=60)
         # NOT --rm: the exit code must survive for reconcile_deployments to read,
@@ -664,7 +909,8 @@ async def main() -> None:
     log("development agent runner starting")
     os.makedirs(WORKSPACE, exist_ok=True)
     pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=4)
-    probe_cache: dict = {}
+    start_heartbeat_thread()
+    start_deploy_thread()
 
     # Work left mid-flight by a crash — or by the rebuild that restarted us —
     # would otherwise sit in a non-terminal status forever. Both are safe to
@@ -679,14 +925,6 @@ async def main() -> None:
 
     while True:
         try:
-            await heartbeat(pool, probe_cache)
-            await reconcile_deployments(pool)
-
-            dep = await claim_deployment(pool)
-            if dep is not None:
-                await run_deployment(pool, dep)
-                continue
-
             job = await claim_job(pool)
             if job is not None:
                 await run_job(pool, job)

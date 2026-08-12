@@ -5,6 +5,7 @@ import {
   ExternalLink,
   GitPullRequest,
   MessageCircleQuestion,
+  Pencil,
   Plus,
   RefreshCw,
   Rocket,
@@ -25,12 +26,14 @@ import {
   listDeployments,
   listJobs,
   retryJob,
+  updateJobPrompt,
   type Deployment,
   type DevConfig,
   type Job,
   type JobDetail,
   type JobStatus,
 } from '@/lib/development'
+import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
@@ -63,24 +66,35 @@ const POLL_MS = 5000
 const VIEWS = ['jobs', 'deployments'] as const
 type View = (typeof VIEWS)[number]
 
-type BadgeVariant = 'default' | 'secondary' | 'destructive' | 'outline'
-
-const STATUS_VARIANT: Record<JobStatus, BadgeVariant> = {
-  pending: 'secondary',
-  running: 'secondary',
-  answer_pending: 'outline',
-  deployment_ready: 'default',
-  deploying: 'secondary',
-  deployed: 'default',
-  failed: 'destructive',
-  cancelled: 'outline',
+/** One soft tint per status, so the stage is readable at a glance without any
+ *  heavy fills. Dark mode uses a low-opacity wash of the same hue rather than a
+ *  darker block, keeping the labels light in both themes. */
+const STATUS_CLASS: Record<JobStatus, string> = {
+  pending:
+    'bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-400/15 dark:text-slate-300 dark:border-slate-400/25',
+  running:
+    'bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-400/15 dark:text-blue-300 dark:border-blue-400/25',
+  answer_pending:
+    'bg-amber-100 text-amber-800 border-amber-200 dark:bg-amber-400/15 dark:text-amber-300 dark:border-amber-400/25',
+  deployment_ready:
+    'bg-violet-100 text-violet-700 border-violet-200 dark:bg-violet-400/15 dark:text-violet-300 dark:border-violet-400/25',
+  deploying:
+    'bg-sky-100 text-sky-700 border-sky-200 dark:bg-sky-400/15 dark:text-sky-300 dark:border-sky-400/25',
+  deployed:
+    'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-400/15 dark:text-emerald-300 dark:border-emerald-400/25',
+  failed:
+    'bg-rose-100 text-rose-700 border-rose-200 dark:bg-rose-400/15 dark:text-rose-300 dark:border-rose-400/25',
+  cancelled:
+    'bg-zinc-100 text-zinc-600 border-zinc-200 dark:bg-zinc-400/15 dark:text-zinc-400 dark:border-zinc-400/25',
 }
 
-/** Extra colour for the two states that need the operator's attention. */
-const STATUS_CLASS: Partial<Record<JobStatus, string>> = {
-  answer_pending: 'border-amber-500 text-amber-600 dark:text-amber-500',
-  deployment_ready: 'bg-green-600 hover:bg-green-600',
-  deployed: 'bg-green-600 hover:bg-green-600',
+/** Deployment rows reuse the job palette for the stages they share. */
+const DEPLOY_STATUS_CLASS: Record<Deployment['status'], string> = {
+  pending: STATUS_CLASS.pending,
+  merging: STATUS_CLASS.running,
+  deploying: STATUS_CLASS.deploying,
+  deployed: STATUS_CLASS.deployed,
+  failed: STATUS_CLASS.failed,
 }
 
 function fmt(dt: string | null): string {
@@ -92,7 +106,7 @@ function fmt(dt: string | null): string {
 function StatusBadge({ status }: { status: JobStatus }) {
   const { t } = useTranslation()
   return (
-    <Badge variant={STATUS_VARIANT[status]} className={STATUS_CLASS[status]}>
+    <Badge variant="outline" className={cn('font-medium', STATUS_CLASS[status])}>
       {t(`agent.status_${status}`)}
     </Badge>
   )
@@ -129,15 +143,33 @@ function SetupNotice({ config }: { config: DevConfig }) {
   }
   if (!config.runner_online) problems.push(t('agent.setupNoRunner'))
   if (problems.length === 0) return null
+  // A single problem reads as a sentence, not a list: centre it against the icon
+  // and the button, and drop the lone bullet. Several problems stay a top-aligned
+  // bulleted list so the icon sits with the first line.
+  const single = problems.length === 1
   return (
-    <div className="flex flex-wrap items-start justify-between gap-4 rounded-md border border-amber-500/50 bg-amber-500/10 px-4 py-3 text-sm">
-      <div className="flex gap-3">
-        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-500" />
-        <ul className="list-inside list-disc space-y-0.5">
-          {problems.map((p) => (
-            <li key={p}>{p}</li>
-          ))}
-        </ul>
+    <div
+      className={cn(
+        'flex flex-wrap justify-between gap-4 rounded-md border border-amber-500/50 bg-amber-500/10 px-4 py-3 text-sm',
+        single ? 'items-center' : 'items-start',
+      )}
+    >
+      <div className={cn('flex gap-3', single && 'items-center')}>
+        <AlertTriangle
+          className={cn(
+            'h-4 w-4 shrink-0 text-amber-600 dark:text-amber-500',
+            !single && 'mt-0.5',
+          )}
+        />
+        {single ? (
+          <span>{problems[0]}</span>
+        ) : (
+          <ul className="list-inside list-disc space-y-0.5">
+            {problems.map((p) => (
+              <li key={p}>{p}</li>
+            ))}
+          </ul>
+        )}
       </div>
       <Button asChild variant="outline" size="sm" className="shrink-0">
         <Link to="/settings/app?tab=development">{t('agent.setupLink')}</Link>
@@ -164,6 +196,8 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
   const [prompt, setPrompt] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
+  const [editFor, setEditFor] = useState<Job | null>(null)
+  const [editPrompt, setEditPrompt] = useState('')
   const [answerFor, setAnswerFor] = useState<Job | null>(null)
   const [answer, setAnswer] = useState('')
   const [detail, setDetail] = useState<JobDetail | null>(null)
@@ -240,6 +274,15 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
     } finally {
       setBusyId(null)
     }
+  }
+
+  async function onEdit(e: FormEvent) {
+    e.preventDefault()
+    if (!editFor || !editPrompt.trim()) return
+    const job = editFor
+    const text = editPrompt.trim()
+    setEditFor(null)
+    await act(job.id, () => updateJobPrompt(job.id, text), t('agent.editFailed'))
   }
 
   async function onAnswer(e: FormEvent) {
@@ -357,6 +400,21 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
+                        {job.status === 'pending' && canRun && (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            disabled={busyId === job.id}
+                            onClick={() => {
+                              setEditFor(job)
+                              setEditPrompt(job.prompt)
+                            }}
+                          >
+                            <Pencil className="mr-2 h-4 w-4" />
+                            {t('common.edit')}
+                          </Button>
+                        )}
                         {job.status === 'answer_pending' && canRun && (
                           <Button
                             type="button"
@@ -458,10 +516,7 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
                       {d.error && <div className="truncate text-xs text-destructive">{d.error}</div>}
                     </TableCell>
                     <TableCell>
-                      <Badge
-                        variant={d.status === 'failed' ? 'destructive' : 'secondary'}
-                        className={d.status === 'deployed' ? 'bg-green-600 hover:bg-green-600' : undefined}
-                      >
+                      <Badge variant="outline" className={cn('font-medium', DEPLOY_STATUS_CLASS[d.status])}>
                         {t(`agent.deployStatus_${d.status}`)}
                       </Badge>
                     </TableCell>
@@ -513,6 +568,35 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
               </Button>
               <Button type="submit" disabled={!canSubmit || submitting}>
                 {submitting ? t('agent.starting') : t('agent.start')}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Edit a pending job ──────────────────────────────────────────── */}
+      <Dialog open={editFor !== null} onOpenChange={(o) => !o && setEditFor(null)}>
+        <DialogContent>
+          <form onSubmit={onEdit}>
+            <DialogHeader>
+              <DialogTitle>{t('agent.editTitle')}</DialogTitle>
+              <DialogDescription>{t('agent.editHint')}</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-2 py-4">
+              <Label htmlFor="edit-prompt">{t('agent.prompt')}</Label>
+              <Textarea
+                id="edit-prompt"
+                rows={8}
+                value={editPrompt}
+                onChange={(e) => setEditPrompt(e.target.value)}
+              />
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setEditFor(null)}>
+                {t('common.cancel')}
+              </Button>
+              <Button type="submit" disabled={!editPrompt.trim()}>
+                {t('common.save')}
               </Button>
             </DialogFooter>
           </form>

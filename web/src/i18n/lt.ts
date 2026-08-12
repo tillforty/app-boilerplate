@@ -370,7 +370,7 @@ export const lt: Dictionary = {
     deployEnabledHint:
       'Įjungus, „Diegti“ sulieja pull request’ą ir perkuria šį serverį. Išjungus — suliesite rankiniu būdu.',
     checkoutPath: 'Serverio katalogas',
-    checkoutPathHint: 'Šio serverio katalogas, kuris atnaujinamas ir perkuriamas diegiant.',
+    checkoutPathHint: 'Nustatoma per APP_CHECKOUT_PATH faile .env — konteineris prijungia būtent šį kelią, todėl keisti galima tik ten ir paleisti ./start.sh.',
     runnerOnline: 'Agento vykdyklė veikia',
     runnerOffline: 'Agento vykdyklė neveikia',
     runnerOfflineHint: 'Faile .env nustatykite AGENT_ENABLED=true ir paleiskite ./start.sh.',
@@ -418,6 +418,9 @@ export const lt: Dictionary = {
     status_cancelled: 'Atšaukta',
     agent_claude_code: 'Claude Code',
     agent_codex: 'OpenAI Codex',
+    editTitle: 'Redaguoti užduotį',
+    editHint: 'Užduotis dar nepradėta, todėl užklausą galite pakeisti. Pavadinimas bus sugeneruotas iš naujo.',
+    editFailed: 'Nepavyko išsaugoti užklausos',
     answer: 'Atsakyti',
     answerTitle: 'Agentas turi klausimą',
     answerHint: 'Atsakykite ir užduotis tęsis nuo tos vietos, kur sustojo.',
