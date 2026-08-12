@@ -21,3 +21,15 @@
 	encode gzip
 	reverse_proxy web:80
 }
+
+# GlitchTip error monitoring — served on its own subdomain when
+# GLITCHTIP_PUBLIC_DOMAIN is set (e.g. errors.tillforty.com). Add a DNS A record
+# for that host pointing at this server and Caddy auto-provisions its TLS cert.
+# GlitchTip is a root-path app (its own /api and /assets), so it needs a
+# dedicated hostname — it can't live under a subpath of {$DOMAIN}. When the var
+# is unset this binds a harmless internal-only address (never publicly exposed).
+{$GLITCHTIP_PUBLIC_DOMAIN:http://localhost:9998} {
+	{$CADDY_TLS}
+	encode gzip
+	reverse_proxy glitchtip:8080
+}

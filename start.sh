@@ -170,6 +170,43 @@ if ! grep -q '^SENTRY_API_TOKEN=' .env; then
   } >> .env
 fi
 
+# GlitchTip public subdomain + first-run auto-provisioning settings (idempotent).
+if ! grep -q '^GLITCHTIP_PUBLIC_DOMAIN=' .env; then
+  {
+    printf '# GlitchTip is reached via its published port; GLITCHTIP_DOMAIN is auto-set to\n'
+    printf '# http://DOMAIN:GLITCHTIP_PORT each run. Set GLITCHTIP_PUBLIC_DOMAIN only to\n'
+    printf '# override with a dedicated Caddy-TLS subdomain (host or http(s)://host).\n'
+    printf 'GLITCHTIP_PUBLIC_DOMAIN=\n'
+    printf '# First-run auto-provisioning: create the GlitchTip admin, org, project,\n'
+    printf '# DSN and API token, and write SENTRY_* back into .env automatically.\n'
+    printf 'GLITCHTIP_AUTOPROVISION=true\n'
+    printf 'GLITCHTIP_ADMIN_EMAIL=\n'
+    printf 'GLITCHTIP_ADMIN_PASSWORD=\n'
+    printf 'GLITCHTIP_ORG_NAME=Tillforty\n'
+    printf 'GLITCHTIP_PROJECT_NAME=tillforty-app\n'
+  } >> .env
+fi
+
+# GlitchTip is reached via its published PORT (no separate subdomain/DNS/TLS).
+# Derive its URL from THIS install's DOMAIN + port so each customer instance is
+# reachable at their own domain:port; fall back to localhost. GLITCHTIP_DOMAIN is
+# the DSN host + email-link host + CSRF origin, so it must be the URL browsers
+# use. An explicit GLITCHTIP_PUBLIC_DOMAIN still overrides (e.g. a real subdomain
+# proxied by Caddy — bare host ⇒ https, or pass a full http(s)://host[:port]).
+DOMAIN_VAL="$(grep -E '^DOMAIN=' .env | cut -d= -f2 || true)"
+GLITCHTIP_PORT_DERIVE="$(grep -E '^GLITCHTIP_PORT=' .env | cut -d= -f2 || true)"; GLITCHTIP_PORT_DERIVE="${GLITCHTIP_PORT_DERIVE:-8090}"
+GLITCHTIP_PUBLIC_DOMAIN_VAL="$(grep -E '^GLITCHTIP_PUBLIC_DOMAIN=' .env | cut -d= -f2 || true)"
+if [ -n "${GLITCHTIP_PUBLIC_DOMAIN_VAL:-}" ]; then
+  case "$GLITCHTIP_PUBLIC_DOMAIN_VAL" in
+    http://*|https://*) set_env GLITCHTIP_DOMAIN "$GLITCHTIP_PUBLIC_DOMAIN_VAL" ;;
+    *)                  set_env GLITCHTIP_DOMAIN "https://${GLITCHTIP_PUBLIC_DOMAIN_VAL}" ;;
+  esac
+elif [ -n "${DOMAIN_VAL:-}" ]; then
+  set_env GLITCHTIP_DOMAIN "http://${DOMAIN_VAL}:${GLITCHTIP_PORT_DERIVE}"
+else
+  set_env GLITCHTIP_DOMAIN "http://localhost:${GLITCHTIP_PORT_DERIVE}"
+fi
+
 # Source ports for the final summary (defaults match docker-compose.yml).
 WEB_PORT="$(grep -E '^WEB_PORT=' .env | cut -d= -f2 || true)"; WEB_PORT="${WEB_PORT:-8080}"
 API_PORT="$(grep -E '^API_PORT=' .env | cut -d= -f2 || true)"; API_PORT="${API_PORT:-8000}"
@@ -230,6 +267,67 @@ else
   warn "API didn't report ready within ~2 min. Check logs: $DC logs api"
 fi
 
+# ── GlitchTip auto-provisioning (first run) ──────────────────────────────────
+# When GlitchTip is enabled and error capture isn't wired yet, create the admin,
+# org, project, DSN and API token, and write the SENTRY_* keys into .env — so the
+# Development › Issues page + error capture go live without any manual clicking.
+GLITCHTIP_ENABLED_VAL="$(grep -E '^GLITCHTIP_ENABLED=' .env | cut -d= -f2 || true)"
+SENTRY_DSN_VAL="$(grep -E '^SENTRY_DSN=' .env | cut -d= -f2 || true)"
+AUTOPROV_VAL="$(grep -E '^GLITCHTIP_AUTOPROVISION=' .env | cut -d= -f2 || true)"
+GT_PW_SHOW=""; GT_ADMIN_EMAIL=""
+if [ "${GLITCHTIP_ENABLED_VAL:-false}" = "true" ] && [ -z "${SENTRY_DSN_VAL:-}" ] && [ "${AUTOPROV_VAL:-true}" != "false" ]; then
+  info "GlitchTip is enabled but error capture isn't wired — auto-provisioning…"
+
+  GT_ADMIN_EMAIL="$(grep -E '^GLITCHTIP_ADMIN_EMAIL=' .env | cut -d= -f2 || true)"
+  if [ -z "${GT_ADMIN_EMAIL:-}" ]; then
+    GT_ADMIN_EMAIL="$(grep -E '^SEED_USER_EMAIL=' .env | cut -d= -f2 || true)"
+    [ -z "$GT_ADMIN_EMAIL" ] && GT_ADMIN_EMAIL="$(grep -E '^ACME_EMAIL=' .env | cut -d= -f2 || true)"
+    [ -n "$GT_ADMIN_EMAIL" ] && set_env GLITCHTIP_ADMIN_EMAIL "$GT_ADMIN_EMAIL"
+  fi
+  GT_ADMIN_PW="$(grep -E '^GLITCHTIP_ADMIN_PASSWORD=' .env | cut -d= -f2 || true)"
+  if [ -z "${GT_ADMIN_PW:-}" ]; then
+    GT_ADMIN_PW="$(gen 12)"; GT_PW_SHOW="$GT_ADMIN_PW"
+    set_env GLITCHTIP_ADMIN_PASSWORD "$GT_ADMIN_PW"
+  fi
+  GT_ORG_NAME="$(grep -E '^GLITCHTIP_ORG_NAME=' .env | cut -d= -f2- || true)"; GT_ORG_NAME="${GT_ORG_NAME:-Tillforty}"
+  GT_PROJ_NAME="$(grep -E '^GLITCHTIP_PROJECT_NAME=' .env | cut -d= -f2- || true)"; GT_PROJ_NAME="${GT_PROJ_NAME:-tillforty-app}"
+
+  prov_out=""
+  if [ -n "$GT_ADMIN_EMAIL" ]; then
+    info "Waiting for GlitchTip to be ready…"
+    for _ in $(seq 1 40); do
+      if $DC exec -T glitchtip ./manage.py showmigrations >/dev/null 2>&1; then
+        $DC cp scripts/glitchtip_provision.py glitchtip:/tmp/tf_provision.py >/dev/null 2>&1 || true
+        prov_out="$($DC exec -T \
+          -e GLITCHTIP_ADMIN_EMAIL="$GT_ADMIN_EMAIL" \
+          -e GLITCHTIP_ADMIN_PASSWORD="$GT_ADMIN_PW" \
+          -e GLITCHTIP_ORG_NAME="$GT_ORG_NAME" \
+          -e GLITCHTIP_PROJECT_NAME="$GT_PROJ_NAME" \
+          glitchtip ./manage.py shell -c "exec(open('/tmp/tf_provision.py').read())" 2>/dev/null || true)"
+        printf '%s' "$prov_out" | grep -q '__TF_PROVISION__' && break
+      fi
+      sleep 3
+    done
+  else
+    warn "No admin email available for GlitchTip provisioning; skipping (set GLITCHTIP_ADMIN_EMAIL)."
+  fi
+
+  if printf '%s' "$prov_out" | grep -q '__TF_PROVISION__'; then
+    _pv() { printf '%s' "$prov_out" | grep -E "^$1=" | head -1 | cut -d= -f2-; }
+    set_env SENTRY_DSN          "$(_pv DSN_INTERNAL)"
+    set_env VITE_SENTRY_DSN     "$(_pv DSN_PUBLIC)"
+    set_env SENTRY_API_TOKEN    "$(_pv API_TOKEN)"
+    set_env SENTRY_ORG_SLUG     "$(_pv ORG_SLUG)"
+    set_env SENTRY_PROJECT_SLUG "$(_pv PROJECT_SLUG)"
+    ok "GlitchTip provisioned (org=$(_pv ORG_SLUG), project=$(_pv PROJECT_SLUG))."
+    info "Baking the browser DSN into the web build and reloading the API…"
+    $DC up -d --build web >/dev/null 2>&1 || warn "web rebuild failed — re-run ./start.sh."
+    $DC up -d --force-recreate api >/dev/null 2>&1 || true
+  else
+    warn "GlitchTip auto-provision didn't complete; the Development › Issues checklist will guide manual setup."
+  fi
+fi
+
 N8N_PORT_VAL="$(grep -E '^N8N_PORT=' .env | cut -d= -f2 || true)"; N8N_PORT_VAL="${N8N_PORT_VAL:-5678}"
 if [ -n "${DOMAIN:-}" ]; then
   cat <<EOF
@@ -253,8 +351,13 @@ if [ "${N8N_ENABLED:-false}" = "true" ]; then
   printf '  n8n:        http://localhost:%s\n\n' "$N8N_PORT_VAL"
 fi
 GLITCHTIP_PORT_VAL="$(grep -E '^GLITCHTIP_PORT=' .env | cut -d= -f2 || true)"; GLITCHTIP_PORT_VAL="${GLITCHTIP_PORT_VAL:-8090}"
+GLITCHTIP_DOMAIN_SHOW="$(grep -E '^GLITCHTIP_DOMAIN=' .env | cut -d= -f2- || true)"
 if [ "${GLITCHTIP_ENABLED:-false}" = "true" ]; then
-  printf '  GlitchTip:  http://localhost:%s   (create org+project, then paste its DSN into SENTRY_DSN/VITE_SENTRY_DSN)\n\n' "$GLITCHTIP_PORT_VAL"
+  printf '  GlitchTip:  %s   (ensure port %s is open on the host firewall)\n' "${GLITCHTIP_DOMAIN_SHOW:-http://localhost:$GLITCHTIP_PORT_VAL}" "$GLITCHTIP_PORT_VAL"
+  if [ -n "${GT_PW_SHOW:-}" ]; then
+    printf '  GlitchTip admin (generated): %s / %s   (saved in .env, shown once)\n' "$GT_ADMIN_EMAIL" "$GT_PW_SHOW"
+  fi
+  printf '\n'
 fi
 
 if [ -n "$ADMIN_PASSWORD" ]; then
