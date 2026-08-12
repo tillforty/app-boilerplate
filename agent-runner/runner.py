@@ -850,6 +850,11 @@ async def run_deployment(pool, dep) -> None:
         started = run(
             [
                 "docker", "run", "-d", "--name", container_name,
+                # start.sh finishes by polling http://localhost:$API_PORT/ready.
+                # In its own network namespace that loopback is the container's,
+                # not the host's, so the check could never pass and every deploy
+                # burned the full readiness timeout before reporting success.
+                "--network", "host",
                 "-v", "/var/run/docker.sock:/var/run/docker.sock",
                 "-v", f"{checkout}:{checkout}",
                 "-e", f"CHECKOUT={checkout}",
