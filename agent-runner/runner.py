@@ -26,6 +26,7 @@ them with pgp_sym_decrypt using the shared VAULT_KEY.
 import asyncio
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -63,6 +64,10 @@ CODEX_ARGS = os.environ.get(
 
 # Where the agent leaves a question instead of guessing. Excluded from commits.
 QUESTION_FILE = ".agent/QUESTION.md"
+
+# Where the requester's screenshots/files are dropped for the agent to open.
+# Inside the same excluded .agent/ directory, so they never reach the commit.
+ATTACHMENT_DIR = ".agent/attachments"
 
 LOG_LIMIT = 20000
 
@@ -223,6 +228,73 @@ async def heartbeat(pool, cache: dict) -> None:
     )
 
 
+# ── Prompt attachments ───────────────────────────────────────────────────────
+_UNSAFE_NAME_CHARS = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def safe_name(name: str, index: int) -> str:
+    """Sanitise a stored attachment name into a filename.
+
+    Mirrors devagent._safe_name. The API already sanitises on upload; this
+    repeats it because the value becomes a path here, and a row could have been
+    written by something other than that endpoint.
+    """
+    base = os.path.basename((name or "").replace("\\", "/"))
+    stem, _, suffix = base.rpartition(".")
+    if not stem:
+        stem, suffix = base, ""
+    stem = _UNSAFE_NAME_CHARS.sub("_", stem).strip("._") or f"attachment-{index}"
+    suffix = _UNSAFE_NAME_CHARS.sub("", suffix)[:16]
+    return f"{stem[:100]}.{suffix}" if suffix else stem[:100]
+
+
+async def write_attachments(pool, job_id: int, workdir: str) -> list[dict]:
+    """Write the requester's screenshots/files into the workspace.
+
+    They go under .agent/ — the same git-excluded directory as QUESTION.md — so
+    an attachment can never end up in the commit, and are handed to AGENT_USER
+    because the coding CLI runs unprivileged and has to open them. Re-written on
+    every run, so they survive a question/answer round trip or a retry.
+    """
+    rows = await pool.fetch(
+        "SELECT name, mime, size, data FROM dev_job_files WHERE job_id = $1 ORDER BY id",
+        job_id,
+    )
+    if not rows:
+        return []
+
+    target = os.path.join(workdir, *ATTACHMENT_DIR.split("/"))
+    os.makedirs(target, exist_ok=True)
+    written: list[dict] = []
+    used: set[str] = set()
+    for index, row in enumerate(rows, start=1):
+        name = safe_name(row["name"], index)
+        # Two uploads can share a name; keep both rather than overwriting one.
+        if name in used:
+            stem, dot, suffix = name.partition(".")
+            name = f"{stem}-{index}{dot}{suffix}"
+        used.add(name)
+        with open(os.path.join(target, name), "wb") as fh:
+            fh.write(row["data"])
+        written.append(
+            {
+                "path": f"{ATTACHMENT_DIR}/{name}",
+                "mime": row["mime"] or "application/octet-stream",
+                "size": row["size"],
+            }
+        )
+    run(["chown", "-R", f"{AGENT_USER}:{AGENT_USER}", os.path.join(workdir, ".agent")], timeout=60)
+    return written
+
+
+def human_size(size: int) -> str:
+    if size < 1024:
+        return f"{size} B"
+    if size < 1024 * 1024:
+        return f"{size // 1024} KB"
+    return f"{size / (1024 * 1024):.1f} MB"
+
+
 # ── Prompt construction ──────────────────────────────────────────────────────
 PREAMBLE = """\
 You are an autonomous software engineer working inside a git checkout of {repo}.
@@ -247,8 +319,23 @@ Rules:
 """
 
 
-def build_prompt(repo: str, job, history: list) -> str:
+ATTACHMENTS = """
+The requester attached these files for context, already saved in this working
+tree ({dir}/ is untracked, so never commit or move them):
+
+{items}
+
+Open them before you start — a screenshot is usually the screen to change.
+"""
+
+
+def build_prompt(repo: str, job, history: list, attachments: list[dict]) -> str:
     text = PREAMBLE.format(repo=repo, prompt=job["prompt"], question_file=QUESTION_FILE)
+    if attachments:
+        items = "\n".join(
+            f"- {a['path']} ({a['mime']}, {human_size(a['size'])})" for a in attachments
+        )
+        text += ATTACHMENTS.format(dir=ATTACHMENT_DIR, items=items)
     if history:
         lines = ["", "Earlier in this job you asked, and the requester answered:", ""]
         for kind, message in history:
@@ -346,9 +433,15 @@ async def run_job(pool, job) -> None:
         if co.returncode != 0:
             return await fail_job(pool, job_id, f"Could not create branch {branch}.", "\n".join(transcript))
 
-        # The question file is a channel to the operator, never part of the diff.
+        # The question file and the attachments are channels to/from the
+        # operator, never part of the diff. Excluded before anything writes
+        # there, so nothing in .agent/ can be picked up by `git add -A`.
         with open(os.path.join(workdir, ".git", "info", "exclude"), "a") as fh:
             fh.write("\n.agent/\n")
+
+        # Re-materialised on every run; the queue event already named them, so
+        # this stays out of the timeline.
+        attachments = await write_attachments(pool, job_id, workdir)
 
         # ── Run the coding CLI ──────────────────────────────────────────────
         history = [
@@ -359,7 +452,7 @@ async def run_job(pool, job) -> None:
                 job_id,
             )
         ]
-        prompt = build_prompt(repo, job, history)
+        prompt = build_prompt(repo, job, history, attachments)
 
         if job["agent"] == "claude_code":
             cmd = ["claude", *CLAUDE_ARGS]
@@ -441,6 +534,11 @@ async def run_job(pool, job) -> None:
             f"Automated by the Tillforty development agent (job #{job_id}).\n\n"
             f"**Request**\n\n{job['prompt']}\n"
         )
+        if attachments:
+            # The files themselves stay out of the repo; the names tell a reviewer
+            # the agent had more to go on than the prompt.
+            names = ", ".join(f"`{os.path.basename(a['path'])}`" for a in attachments)
+            body += f"\n**Attachments**: {names}\n"
         pr = await gh_post(
             token, f"/repos/{repo}/pulls",
             {"title": job["title"][:250], "head": branch, "base": base_branch, "body": body[:60000]},

@@ -1,4 +1,4 @@
-import { api } from './api'
+import { api, apiBlob } from './api'
 
 /** Per-requirement flags for the Development › Issues setup checklist. */
 export interface DevSetupStatus {
@@ -108,6 +108,20 @@ export interface JobEvent {
   created_at: string
 }
 
+/** A screenshot or file the requester attached to a job's prompt or answer. */
+export interface JobFile {
+  id: number
+  name: string
+  mime: string | null
+  size: number
+}
+
+/** Attachment ceilings, mirrored from devagent.py so the picker can reject
+ *  oversized files before a pointless upload. */
+export const MAX_JOB_FILES = 10
+export const MAX_JOB_FILE_BYTES = 10 * 1024 * 1024
+export const MAX_JOB_FILES_TOTAL_BYTES = 25 * 1024 * 1024
+
 export interface Job {
   id: number
   title: string
@@ -122,6 +136,7 @@ export interface Job {
   question: string | null
   error: string | null
   attempts: number
+  files: JobFile[]
   created_by_name: string | null
   created_at: string
   started_at: string | null
@@ -156,11 +171,33 @@ export const validateDevConfig = () =>
 
 export const listJobs = (limit = 50) => api.get<Job[]>(`/development/jobs?limit=${limit}`)
 export const getJob = (id: number) => api.get<JobDetail>(`/development/jobs/${id}`)
-/** The title is written by the operating agent from the prompt, not supplied. */
-export const createJob = (body: { prompt: string }) =>
-  api.post<Job>('/development/jobs', body)
-export const answerJob = (id: number, answer: string) =>
-  api.post<Job>(`/development/jobs/${id}/answer`, { answer })
+/** The title is written by the operating agent from the prompt, not supplied.
+ *  Sent as multipart so the prompt and its attachments arrive together — the
+ *  runner may claim the job seconds later. */
+export const createJob = (body: { prompt: string; files?: File[] }) => {
+  const form = new FormData()
+  form.append('prompt', body.prompt)
+  for (const file of body.files ?? []) form.append('files', file)
+  return api.upload<Job>('/development/jobs', form)
+}
+/** Attachment bytes. Fetched rather than linked, since the route is authenticated. */
+export const fetchJobFile = (jobId: number, fileId: number) =>
+  apiBlob(`/development/jobs/${jobId}/files/${fileId}`)
+export async function downloadJobFile(jobId: number, file: JobFile): Promise<void> {
+  const url = URL.createObjectURL(await fetchJobFile(jobId, file.id))
+  const a = document.createElement('a')
+  a.href = url
+  a.download = file.name
+  a.click()
+  URL.revokeObjectURL(url)
+}
+/** Answers can carry attachments too — the agent often asks about a screen. */
+export const answerJob = (id: number, answer: string, files: File[] = []) => {
+  const form = new FormData()
+  form.append('answer', answer)
+  for (const file of files) form.append('files', file)
+  return api.upload<Job>(`/development/jobs/${id}/answer`, form)
+}
 export const retryJob = (id: number) => api.post<Job>(`/development/jobs/${id}/retry`, {})
 export const cancelJob = (id: number) => api.post<Job>(`/development/jobs/${id}/cancel`, {})
 export const deployJob = (id: number) =>

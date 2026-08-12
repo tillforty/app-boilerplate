@@ -648,12 +648,27 @@ settings, not env vars.
 | API | `backend/app/devagent.py` | Config, validation, jobs, deployments. Never shells out. |
 | Worker | `agent-runner/runner.py` | Clones, runs the CLI, pushes, opens/merges PRs, deploys. |
 | Schema | `migrations/0012_dev_agent.sql` | `dev_settings`, `dev_jobs`, `dev_job_events`, `dev_deployments`. |
+| Attachments | `migrations/0013_dev_job_files.sql` | `dev_job_files` — the bytes of screenshots/files sent with a prompt. |
 | UI | `web/src/components/development/AgentTab.tsx` | Jobs + deployment history. |
 | Settings UI | `web/src/components/settings/DevelopmentTab.tsx` | Repo, token, deploy switch, checks. |
 
 Permissions: `development:read` (see jobs), `development:run` (queue + answer),
 `development:deploy` (merge + rebuild), `development:manage` (repo/token
 settings). The administrator role holds `*` and gets all four.
+
+**Screenshots and files with the prompt.** *New job* takes attachments as well
+as text — drop in a screenshot of the broken screen, a log, or a spec — and so
+does the answer box, since the agent's question is usually about a screen. They
+are uploaded with the prompt in one request (the runner can claim the job seconds
+later), kept in `dev_job_files` in Postgres rather than the file storage backend
+— the runner container talks to the database and nothing else — and written into
+`.agent/attachments/` in the throw-away workspace, where the CLI is told to open
+them. That directory is git-excluded, so an attachment never lands in the commit;
+the PR body just lists the names. Attachments are re-materialised on every run,
+so they survive an answer round trip or a retry. Ceilings live in
+`AGENT_MAX_ATTACHMENTS` / `AGENT_ATTACHMENT_MAX_BYTES` /
+`AGENT_ATTACHMENT_TOTAL_BYTES`; whether an image is actually *read* depends on
+the bound CLI (Claude Code reads images natively).
 
 **Questions instead of guesses.** The agent is instructed to write
 `.agent/QUESTION.md` and stop when a decision is genuinely the requester's. The

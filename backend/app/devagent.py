@@ -1,9 +1,10 @@
 """Development agent — automated coding jobs, PRs, and deploys.
 
-The client writes a prompt; a coding CLI (Claude Code or OpenAI Codex, picked by
-whichever provider is bound to the `development_agent` function in
-Settings › App › AI functions) builds the feature on a branch, opens a PR, and
-one click merges it and rebuilds this server.
+The client writes a prompt — optionally with screenshots or files attached; a
+coding CLI (Claude Code or OpenAI Codex, picked by whichever provider is bound
+to the `development_agent` function in Settings › App › AI functions) builds the
+feature on a branch, opens a PR, and one click merges it and rebuilds this
+server.
 
 Division of labour — this module is the **API only**. It never clones, runs a
 CLI, or shells out: the API container has no git, no Node, no docker socket.
@@ -18,14 +19,26 @@ Job lifecycle:
 
 Secrets: the GitHub token is written to the pgcrypto vault under
 `dev_agent:github_token` and never returned to the browser (only `has_token`).
-Canonical DDL: migrations/0012_dev_agent.sql.
+Canonical DDL: migrations/0012_dev_agent.sql, migrations/0013_dev_job_files.sql.
 """
 import asyncio
 import json
+import os
+import re
 from datetime import datetime, timedelta, timezone
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Response,
+    UploadFile,
+    status,
+)
 from pydantic import BaseModel, Field
 
 from . import db, vault
@@ -54,9 +67,37 @@ AGENT_FUNCTION_KEY = "development_agent"
 DEPLOYABLE = {"deployment_ready", "failed"}
 RETRYABLE = {"failed", "cancelled"}
 
+# Prompt attachments (screenshots, logs, a spec). Stored as bytes in
+# dev_job_files because the runner container reaches Postgres and nothing else;
+# keep the ceilings in step with `client_max_body_size` in web/nginx.conf.
+MAX_ATTACHMENTS = int(os.environ.get("AGENT_MAX_ATTACHMENTS", "10"))
+MAX_ATTACHMENT_BYTES = int(os.environ.get("AGENT_ATTACHMENT_MAX_BYTES", str(10 * 1024 * 1024)))
+MAX_ATTACHMENT_TOTAL_BYTES = int(
+    os.environ.get("AGENT_ATTACHMENT_TOTAL_BYTES", str(25 * 1024 * 1024))
+)
+
+_UNSAFE_NAME_CHARS = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def _safe_name(name: str | None, index: int) -> str:
+    """Browser-supplied filename → something safe to write to disk.
+
+    The runner turns this into a real path, so keep directories and anything
+    that isn't a plain filename character out of it; leading dots go too, so an
+    upload can't pose as `..` or a dotfile. The extension is preserved
+    separately, because that is how a CLI recognises a screenshot as an image.
+    """
+    base = (name or "").replace("\\", "/").rsplit("/", 1)[-1]
+    stem, _, suffix = base.rpartition(".")
+    if not stem:  # no dot at all — the whole name is the stem
+        stem, suffix = base, ""
+    stem = _UNSAFE_NAME_CHARS.sub("_", stem).strip("._") or f"attachment-{index}"
+    suffix = _UNSAFE_NAME_CHARS.sub("", suffix)[:16]
+    return f"{stem[:100]}.{suffix}" if suffix else stem[:100]
+
 
 async def ensure_schema() -> None:
-    """Idempotent mirror of migrations/0012_dev_agent.sql."""
+    """Idempotent mirror of migrations/0012_dev_agent.sql + 0013_dev_job_files.sql."""
     async with db.get_pool().acquire() as conn:
         await conn.execute(
             """
@@ -102,6 +143,17 @@ async def ensure_schema() -> None:
             );
             CREATE INDEX IF NOT EXISTS dev_jobs_status_idx  ON dev_jobs (status);
             CREATE INDEX IF NOT EXISTS dev_jobs_created_idx ON dev_jobs (created_at DESC);
+
+            CREATE TABLE IF NOT EXISTS dev_job_files (
+                id         bigserial PRIMARY KEY,
+                job_id     bigint NOT NULL REFERENCES dev_jobs(id) ON DELETE CASCADE,
+                name       text NOT NULL,
+                mime       text,
+                size       integer NOT NULL,
+                data       bytea NOT NULL,
+                created_at timestamptz NOT NULL DEFAULT now()
+            );
+            CREATE INDEX IF NOT EXISTS dev_job_files_job_idx ON dev_job_files (job_id, id);
 
             CREATE TABLE IF NOT EXISTS dev_job_events (
                 id         bigserial PRIMARY KEY,
@@ -484,6 +536,15 @@ class JobEvent(BaseModel):
     created_at: datetime
 
 
+class JobFile(BaseModel):
+    """An attachment's metadata; the bytes are fetched from /jobs/{id}/files/{id}."""
+
+    id: int
+    name: str
+    mime: str | None
+    size: int
+
+
 class Job(BaseModel):
     id: int
     title: str
@@ -498,6 +559,7 @@ class Job(BaseModel):
     question: str | None
     error: str | None
     attempts: int
+    files: list[JobFile] = []
     created_by_name: str | None = None
     created_at: datetime
     started_at: datetime | None
@@ -509,15 +571,7 @@ class JobDetail(Job):
     events: list[JobEvent]
 
 
-class JobCreate(BaseModel):
-    prompt: str = Field(min_length=5)
-
-
-class AnswerIn(BaseModel):
-    answer: str = Field(min_length=1)
-
-
-def _to_job(row) -> Job:
+def _to_job(row, files: list[JobFile]) -> Job:
     return Job(
         id=row["id"],
         title=row["title"],
@@ -532,11 +586,34 @@ def _to_job(row) -> Job:
         question=row["question"],
         error=row["error"],
         attempts=row["attempts"],
+        files=files,
         created_by_name=row["created_by_name"],
         created_at=row["created_at"],
         started_at=row["started_at"],
         finished_at=row["finished_at"],
     )
+
+
+async def _files_by_job(job_ids: list[int]) -> dict[int, list[JobFile]]:
+    """Attachment metadata for several jobs at once — never the bytes."""
+    if not job_ids:
+        return {}
+    rows = await db.get_pool().fetch(
+        "SELECT id, job_id, name, mime, size FROM dev_job_files "
+        "WHERE job_id = ANY($1::bigint[]) ORDER BY id",
+        job_ids,
+    )
+    grouped: dict[int, list[JobFile]] = {}
+    for r in rows:
+        grouped.setdefault(r["job_id"], []).append(
+            JobFile(id=r["id"], name=r["name"], mime=r["mime"], size=r["size"])
+        )
+    return grouped
+
+
+async def _job_out(row) -> Job:
+    """Single job row + its attachments, the shape every endpoint returns."""
+    return _to_job(row, (await _files_by_job([row["id"]])).get(row["id"], []))
 
 
 _TITLE_SYSTEM = (
@@ -594,15 +671,54 @@ async def list_jobs(
     rows = await db.get_pool().fetch(
         f"{_JOB_SELECT} ORDER BY j.created_at DESC LIMIT $1", limit
     )
-    return [_to_job(r) for r in rows]
+    files = await _files_by_job([r["id"] for r in rows])
+    return [_to_job(r, files.get(r["id"], [])) for r in rows]
+
+
+async def _read_attachments(uploads: list[UploadFile]) -> list[tuple[str, str | None, bytes]]:
+    """Validate the uploaded parts and return (name, mime, bytes) triples."""
+    if len(uploads) > MAX_ATTACHMENTS:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"At most {MAX_ATTACHMENTS} files can be attached to one job.",
+        )
+    attachments: list[tuple[str, str | None, bytes]] = []
+    total = 0
+    for index, upload in enumerate(uploads, start=1):
+        data = await upload.read()
+        if not data:
+            # A zero-byte file gives the agent nothing to read — drop it quietly
+            # rather than failing the whole job over it.
+            continue
+        if len(data) > MAX_ATTACHMENT_BYTES:
+            raise HTTPException(
+                status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                f"'{upload.filename}' is larger than the "
+                f"{MAX_ATTACHMENT_BYTES // (1024 * 1024)} MiB per-file limit.",
+            )
+        total += len(data)
+        if total > MAX_ATTACHMENT_TOTAL_BYTES:
+            raise HTTPException(
+                status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                f"The attachments add up to more than "
+                f"{MAX_ATTACHMENT_TOTAL_BYTES // (1024 * 1024)} MiB.",
+            )
+        attachments.append((_safe_name(upload.filename, index), upload.content_type or None, data))
+    return attachments
 
 
 @router.post("/jobs", response_model=Job, status_code=status.HTTP_201_CREATED)
 async def create_job(
-    body: JobCreate,
+    prompt: str = Form(...),
+    files: list[UploadFile] = File(default=[]),
     user: UserOut = Depends(require_permission("development:run")),
 ) -> Job:
-    """Queue a job. The runner picks it up on its next poll (a few seconds)."""
+    """Queue a job, optionally with screenshots/files the agent should look at.
+
+    multipart/form-data rather than JSON so the prompt and its attachments land
+    in one request: the runner can claim the job within seconds of the insert,
+    so there is no window in which to upload them afterwards.
+    """
     config = await _config_row()
     if not config["repo_full_name"] or not config["has_token"]:
         raise HTTPException(
@@ -617,7 +733,10 @@ async def create_job(
             "Claude (Anthropic) or OpenAI connection in Settings › App › AI functions.",
         )
 
-    prompt = body.prompt.strip()
+    prompt = prompt.strip()
+    if len(prompt) < 5:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Describe what you want built.")
+    attachments = await _read_attachments(files)
     title = await generate_title(prompt)
 
     async with db.get_pool().acquire() as conn:
@@ -634,13 +753,22 @@ async def create_job(
                 agent.model,
                 user.id,
             )
+            if attachments:
+                await conn.executemany(
+                    "INSERT INTO dev_job_files (job_id, name, mime, size, data) "
+                    "VALUES ($1, $2, $3, $4, $5)",
+                    [(row["id"], name, mime, len(data), data) for name, mime, data in attachments],
+                )
+            queued = f"Queued for {agent.label}."
+            if attachments:
+                queued += " Attached: " + ", ".join(name for name, _, _ in attachments)
             await conn.execute(
                 "INSERT INTO dev_job_events (job_id, kind, message) VALUES ($1, 'queued', $2)",
                 row["id"],
-                f"Queued for {agent.label}.",
+                queued,
             )
     full = await db.get_pool().fetchrow(f"{_JOB_SELECT} WHERE j.id = $1", row["id"])
-    return _to_job(full)
+    return await _job_out(full)
 
 
 @router.get("/jobs/{job_id}", response_model=JobDetail)
@@ -655,7 +783,7 @@ async def get_job(
         "SELECT id, kind, message, created_at FROM dev_job_events WHERE job_id = $1 ORDER BY created_at, id",
         job_id,
     )
-    base = _to_job(row)
+    base = await _job_out(row)
     return JobDetail(
         **base.model_dump(),
         log=row["log"],
@@ -663,17 +791,56 @@ async def get_job(
     )
 
 
+@router.get("/jobs/{job_id}/files/{file_id}")
+async def download_job_file(
+    job_id: int,
+    file_id: int,
+    _: UserOut = Depends(require_permission("development:read")),
+) -> Response:
+    """The attachment's bytes, so the UI can preview or download what was sent.
+
+    Always a download, never rendered in place: the MIME type came from whoever
+    uploaded the file, so serving it inline on our own origin would make an
+    HTML "screenshot" a stored-XSS vector. The UI previews images from the
+    fetched blob instead, which this doesn't get in the way of.
+    """
+    row = await db.get_pool().fetchrow(
+        "SELECT name, mime, data FROM dev_job_files WHERE id = $1 AND job_id = $2",
+        file_id,
+        job_id,
+    )
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Attachment not found")
+    return Response(
+        content=bytes(row["data"]),
+        media_type=row["mime"] or "application/octet-stream",
+        headers={
+            "Content-Disposition": f'attachment; filename="{row["name"]}"',
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
 @router.post("/jobs/{job_id}/answer", response_model=Job)
 async def answer_job(
     job_id: int,
-    body: AnswerIn,
+    answer: str = Form(...),
+    files: list[UploadFile] = File(default=[]),
     user: UserOut = Depends(require_permission("development:run")),
 ) -> Job:
     """Reply to the agent's question and put the job back in the queue.
 
     The answer is recorded as a timeline event; the runner replays the whole
     question/answer history into the next agent run, so context is preserved.
+    Attachments are allowed here too — the question is often about a screen —
+    and join the job's existing ones, which the runner re-materialises on every
+    run.
     """
+    answer = answer.strip()
+    if not answer:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "An answer is required.")
+    attachments = await _read_attachments(files)
+
     async with db.get_pool().acquire() as conn:
         async with conn.transaction():
             row = await conn.fetchrow(
@@ -685,10 +852,28 @@ async def answer_job(
                 raise HTTPException(
                     status.HTTP_409_CONFLICT, "This job isn't waiting for an answer."
                 )
+            if attachments:
+                # Cap the whole job, not just this request, so a long
+                # question/answer thread can't grow the row set without bound.
+                stored = await conn.fetchval(
+                    "SELECT COALESCE(SUM(size), 0) FROM dev_job_files WHERE job_id = $1", job_id
+                )
+                if stored + sum(len(data) for _, _, data in attachments) > MAX_ATTACHMENT_TOTAL_BYTES:
+                    raise HTTPException(
+                        status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        f"This job's attachments would exceed "
+                        f"{MAX_ATTACHMENT_TOTAL_BYTES // (1024 * 1024)} MiB in total.",
+                    )
+                await conn.executemany(
+                    "INSERT INTO dev_job_files (job_id, name, mime, size, data) "
+                    "VALUES ($1, $2, $3, $4, $5)",
+                    [(job_id, name, mime, len(data), data) for name, mime, data in attachments],
+                )
+                answer += " (Attached: " + ", ".join(name for name, _, _ in attachments) + ")"
             await conn.execute(
                 "INSERT INTO dev_job_events (job_id, kind, message) VALUES ($1, 'answer', $2)",
                 job_id,
-                body.answer.strip(),
+                answer,
             )
             await conn.execute(
                 """
@@ -699,7 +884,7 @@ async def answer_job(
                 job_id,
             )
     full = await db.get_pool().fetchrow(f"{_JOB_SELECT} WHERE j.id = $1", job_id)
-    return _to_job(full)
+    return await _job_out(full)
 
 
 @router.post("/jobs/{job_id}/retry", response_model=Job)
@@ -728,7 +913,7 @@ async def retry_job(
                 job_id,
             )
     full = await db.get_pool().fetchrow(f"{_JOB_SELECT} WHERE j.id = $1", job_id)
-    return _to_job(full)
+    return await _job_out(full)
 
 
 @router.post("/jobs/{job_id}/cancel", response_model=Job)
@@ -754,7 +939,7 @@ async def cancel_job(
                 job_id,
             )
     full = await db.get_pool().fetchrow(f"{_JOB_SELECT} WHERE j.id = $1", job_id)
-    return _to_job(full)
+    return await _job_out(full)
 
 
 # ── Deployments ──────────────────────────────────────────────────────────────
