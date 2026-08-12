@@ -565,6 +565,12 @@ DEPLOY_SCRIPT = """\
 set -eux
 git config --global --add safe.directory "$CHECKOUT"
 cd "$CHECKOUT"
+# This container is root, but the checkout belongs to the server's own user.
+# Anything git writes here (objects, FETCH_HEAD, index) would otherwise end up
+# root-owned and lock that user out of their own repo on the next command, so
+# remember the owner now and hand everything back on the way out.
+CHECKOUT_OWNER="$(stat -c '%u:%g' "$CHECKOUT")"
+trap 'chown -R "$CHECKOUT_OWNER" "$CHECKOUT" || true' EXIT
 git -c credential.helper='!f(){ echo username=x-access-token; echo "password=$GH_TOKEN"; };f' \
     fetch origin "$BASE_BRANCH"
 git checkout "$BASE_BRANCH"
