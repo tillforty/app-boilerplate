@@ -5,6 +5,7 @@ import {
   ExternalLink,
   GitPullRequest,
   MessageCircleQuestion,
+  Plus,
   RefreshCw,
   Rocket,
   Ban,
@@ -13,6 +14,7 @@ import {
 import { Link } from 'react-router-dom'
 import { useTranslation } from '@/i18n'
 import { usePermissions } from '@/context/PermissionsContext'
+import { useTabParam } from '@/lib/use-tab-param'
 import {
   answerJob,
   cancelJob,
@@ -30,11 +32,10 @@ import {
   type JobStatus,
 } from '@/lib/development'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Dialog,
   DialogContent,
@@ -56,6 +57,11 @@ import { TableEmptyState } from '@/components/ui/table-empty-state'
 /** Statuses where something is still moving, so the list keeps polling. */
 const LIVE: JobStatus[] = ['pending', 'running', 'deploying']
 const POLL_MS = 5000
+
+/** Sub-tabs within the Agent tab. Kept on `?view=` so they don't collide with
+ *  the page-level `?tab=` param, and stay shareable/refresh-proof. */
+const VIEWS = ['jobs', 'deployments'] as const
+type View = (typeof VIEWS)[number]
 
 type BadgeVariant = 'default' | 'secondary' | 'destructive' | 'outline'
 
@@ -124,18 +130,18 @@ function SetupNotice({ config }: { config: DevConfig }) {
   if (!config.runner_online) problems.push(t('agent.setupNoRunner'))
   if (problems.length === 0) return null
   return (
-    <div className="flex gap-3 rounded-md border border-amber-500/50 bg-amber-500/10 px-4 py-3 text-sm">
-      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-500" />
-      <div className="space-y-1">
+    <div className="flex flex-wrap items-start justify-between gap-4 rounded-md border border-amber-500/50 bg-amber-500/10 px-4 py-3 text-sm">
+      <div className="flex gap-3">
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-500" />
         <ul className="list-inside list-disc space-y-0.5">
           {problems.map((p) => (
             <li key={p}>{p}</li>
           ))}
         </ul>
-        <Link to="/settings/app?tab=development" className="text-primary hover:underline">
-          {t('agent.setupLink')}
-        </Link>
       </div>
+      <Button asChild variant="outline" size="sm" className="shrink-0">
+        <Link to="/settings/app?tab=development">{t('agent.setupLink')}</Link>
+      </Button>
     </div>
   )
 }
@@ -153,7 +159,8 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const [title, setTitle] = useState('')
+  const [view, setView] = useTabParam<View>(VIEWS, 'jobs', 'view')
+  const [newOpen, setNewOpen] = useState(false)
   const [prompt, setPrompt] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
@@ -210,9 +217,9 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
     setSubmitting(true)
     setError(null)
     try {
-      await createJob({ title: title.trim() || undefined, prompt: prompt.trim() })
-      setTitle('')
+      await createJob({ prompt: prompt.trim() })
       setPrompt('')
+      setNewOpen(false)
       await refresh()
     } catch (err) {
       setError(err instanceof Error ? err.message : t('agent.createFailed'))
@@ -264,61 +271,33 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
 
       {config && <SetupNotice config={config} />}
 
-      {/* ── New job ─────────────────────────────────────────────────────── */}
-      {canRun && (
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Bot className="h-4 w-4" />
-              {t('agent.newJob')}
-              {config?.agent.configured && (
-                <Badge variant="secondary">
-                  {config.agent.label}
-                  {config.agent.model ? ` · ${config.agent.model}` : ''}
-                </Badge>
-              )}
-            </CardTitle>
-            <p className="text-sm text-muted-foreground">{t('agent.newJobHint')}</p>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={onCreate} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="job-title">{t('agent.jobTitle')}</Label>
-                <Input
-                  id="job-title"
-                  value={title}
-                  placeholder={t('agent.jobTitlePlaceholder')}
-                  onChange={(e) => setTitle(e.target.value)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="job-prompt">{t('agent.prompt')}</Label>
-                <Textarea
-                  id="job-prompt"
-                  value={prompt}
-                  rows={6}
-                  placeholder={t('agent.promptPlaceholder')}
-                  onChange={(e) => setPrompt(e.target.value)}
-                />
-              </div>
-              <Button type="submit" disabled={!canSubmit || submitting}>
-                {submitting ? t('agent.starting') : t('agent.start')}
+      {/* ── Jobs / Deployed versions ────────────────────────────────────── */}
+      <Tabs value={view} onValueChange={(v) => setView(v as View)} className="space-y-3">
+        {/* Tab strip and the actions share one row — the actions apply to both. */}
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <TabsList>
+            <TabsTrigger value="jobs">
+              {t('agent.jobsTitle')} ({jobs.length})
+            </TabsTrigger>
+            <TabsTrigger value="deployments">
+              {t('agent.deploymentsTitle')} ({deployments.length})
+            </TabsTrigger>
+          </TabsList>
+          <div className="flex items-center gap-2">
+            <Button type="button" variant="outline" size="sm" onClick={() => void refresh()}>
+              <RefreshCw className="mr-2 h-4 w-4" />
+              {t('development.refresh')}
+            </Button>
+            {canRun && (
+              <Button type="button" size="sm" onClick={() => setNewOpen(true)}>
+                <Plus className="mr-2 h-4 w-4" />
+                {t('agent.newJob')}
               </Button>
-            </form>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* ── Jobs ────────────────────────────────────────────────────────── */}
-      <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-medium">{t('agent.jobsTitle')}</h2>
-          <Button type="button" variant="outline" size="sm" onClick={() => void refresh()}>
-            <RefreshCw className="mr-2 h-4 w-4" />
-            {t('development.refresh')}
-          </Button>
+            )}
+          </div>
         </div>
-        <div className="rounded-lg border">
+
+        <TabsContent value="jobs" className="rounded-lg border">
           <Table>
             <TableHeader>
               <TableRow>
@@ -442,13 +421,9 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
               )}
             </TableBody>
           </Table>
-        </div>
-      </div>
+        </TabsContent>
 
-      {/* ── Deployment history ──────────────────────────────────────────── */}
-      <div className="space-y-3">
-        <h2 className="text-sm font-medium">{t('agent.deploymentsTitle')}</h2>
-        <div className="rounded-lg border">
+        <TabsContent value="deployments" className="rounded-lg border">
           <Table>
             <TableHeader>
               <TableRow>
@@ -501,8 +476,48 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
               )}
             </TableBody>
           </Table>
-        </div>
-      </div>
+        </TabsContent>
+      </Tabs>
+
+      {/* ── New job ─────────────────────────────────────────────────────── */}
+      <Dialog open={newOpen} onOpenChange={setNewOpen}>
+        <DialogContent>
+          <form onSubmit={onCreate}>
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Bot className="h-4 w-4" />
+                {t('agent.newJob')}
+                {config?.agent.configured && (
+                  <Badge variant="secondary">
+                    {config.agent.label}
+                    {config.agent.model ? ` · ${config.agent.model}` : ''}
+                  </Badge>
+                )}
+              </DialogTitle>
+              <DialogDescription>{t('agent.newJobHint')}</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-2 py-4">
+              <Label htmlFor="job-prompt">{t('agent.prompt')}</Label>
+              <Textarea
+                id="job-prompt"
+                value={prompt}
+                rows={8}
+                placeholder={t('agent.promptPlaceholder')}
+                onChange={(e) => setPrompt(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">{t('agent.titleGenerated')}</p>
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setNewOpen(false)}>
+                {t('common.cancel')}
+              </Button>
+              <Button type="submit" disabled={!canSubmit || submitting}>
+                {submitting ? t('agent.starting') : t('agent.start')}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       {/* ── Answer the agent's question ─────────────────────────────────── */}
       <Dialog open={answerFor !== null} onOpenChange={(o) => !o && setAnswerFor(null)}>

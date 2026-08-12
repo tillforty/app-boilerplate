@@ -395,8 +395,7 @@ export const lt: Dictionary = {
     newJob: 'Nauja užduotis',
     newJobHint:
       'Aprašykite, ką norite sukurti. Agentas dirba atskiroje šakoje ir baigęs sukuria pull request’ą.',
-    jobTitle: 'Pavadinimas (nebūtina)',
-    jobTitlePlaceholder: 'Pagal nutylėjimą — pirma užklausos eilutė',
+    titleGenerated: 'Užduoties pavadinimas sugeneruojamas pagal šią užklausą.',
     prompt: 'Užklausa',
     promptPlaceholder: 'pvz. Pridėti CSV eksporto mygtuką klientų lentelėje.',
     start: 'Pradėti užduotį',
@@ -453,6 +452,6 @@ export const lt: Dictionary = {
     setupNoKey: 'Pasirinktas programavimo agento prisijungimas neturi API rakto.',
     setupNoAgent: 'DI funkcijose nepasirinktas programavimo agentas.',
     setupNoRunner: 'Agento vykdyklė neveikia, todėl užduotys liks laukiančios.',
-    setupLink: 'Atverti Nustatymai › Programa › Programavimas',
+    setupLink: 'Atverti nustatymus',
   },
 }

@@ -165,7 +165,7 @@ export interface Dictionary {
   >
   /** Development › Agent — automated coding jobs and deployment history. */
   agent: Record<
-    | 'newJob' | 'newJobHint' | 'jobTitle' | 'jobTitlePlaceholder'
+    | 'newJob' | 'newJobHint' | 'titleGenerated'
     | 'prompt' | 'promptPlaceholder' | 'start' | 'starting'
     | 'jobsTitle' | 'jobsEmpty' | 'jobsEmptyTitle'
     | 'colJob' | 'colAgent' | 'colStatus' | 'colPr' | 'colCreated'
@@ -578,8 +578,7 @@ export const en: Dictionary = {
     newJob: 'New job',
     newJobHint:
       'Describe what you want built. The agent works on a branch and opens a pull request when it’s done.',
-    jobTitle: 'Title (optional)',
-    jobTitlePlaceholder: 'Defaults to the first line of the prompt',
+    titleGenerated: 'The job title is written for you from this prompt.',
     prompt: 'Prompt',
     promptPlaceholder: 'e.g. Add a CSV export button to the customers table.',
     start: 'Start job',
@@ -636,6 +635,6 @@ export const en: Dictionary = {
     setupNoKey: 'The selected development agent connection has no API key.',
     setupNoAgent: 'No development agent is selected under AI functions.',
     setupNoRunner: 'The agent runner is not running, so jobs will stay pending.',
-    setupLink: 'Open Settings › App › Development',
+    setupLink: 'Open settings',
   },
 }

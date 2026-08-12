@@ -156,7 +156,8 @@ export const validateDevConfig = () =>
 
 export const listJobs = (limit = 50) => api.get<Job[]>(`/development/jobs?limit=${limit}`)
 export const getJob = (id: number) => api.get<JobDetail>(`/development/jobs/${id}`)
-export const createJob = (body: { title?: string; prompt: string }) =>
+/** The title is written by the operating agent from the prompt, not supplied. */
+export const createJob = (body: { prompt: string }) =>
   api.post<Job>('/development/jobs', body)
 export const answerJob = (id: number, answer: string) =>
   api.post<Job>(`/development/jobs/${id}/answer`, { answer })

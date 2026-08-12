@@ -20,6 +20,7 @@ Secrets: the GitHub token is written to the pgcrypto vault under
 `dev_agent:github_token` and never returned to the browser (only `has_token`).
 Canonical DDL: migrations/0012_dev_agent.sql.
 """
+import asyncio
 import json
 from datetime import datetime, timedelta, timezone
 
@@ -509,7 +510,6 @@ class JobDetail(Job):
 
 
 class JobCreate(BaseModel):
-    title: str | None = Field(default=None, max_length=200)
     prompt: str = Field(min_length=5)
 
 
@@ -537,6 +537,46 @@ def _to_job(row) -> Job:
         started_at=row["started_at"],
         finished_at=row["finished_at"],
     )
+
+
+_TITLE_SYSTEM = (
+    "You name software tasks. Reply with ONE short imperative title for the task "
+    "described by the user — six words or fewer, no quotes, no trailing period, "
+    "no prefix. Reply with the title and nothing else."
+)
+
+
+async def generate_title(prompt: str) -> str:
+    """Name the job with the operating agent, so the jobs table reads as a list
+    of changes rather than a wall of prompt text.
+
+    Best-effort by design: a missing binding, a slow provider, or a junk answer
+    all fall back to the prompt's first line. Naming is never worth failing a
+    job the user actually asked for.
+    """
+    fallback = (prompt.strip().splitlines() or [""])[0][:120].strip() or "Untitled job"
+    try:
+        from . import llm  # lazy: llm imports llmconfig, which imports us indirectly
+
+        text = await asyncio.wait_for(
+            llm.complete(
+                [
+                    {"role": "system", "content": _TITLE_SYSTEM},
+                    {"role": "user", "content": prompt[:4000]},
+                ],
+                max_tokens=32,
+            ),
+            timeout=20,
+        )
+    except Exception:  # noqa: BLE001 — any failure just means "use the fallback"
+        return fallback
+    # Models like to wrap titles in quotes or prepend "Title:".
+    title = (text or "").strip().strip('"').strip("'").rstrip(".").strip()
+    if title.lower().startswith("title:"):
+        title = title[6:].strip()
+    # A multi-line answer means it ignored the instruction; keep the first line.
+    title = (title.splitlines() or [""])[0].strip()
+    return title[:120] or fallback
 
 
 _JOB_SELECT = """
@@ -578,8 +618,7 @@ async def create_job(
         )
 
     prompt = body.prompt.strip()
-    # Default the title to the first line of the prompt, trimmed to fit.
-    title = (body.title or "").strip() or prompt.splitlines()[0][:120]
+    title = await generate_title(prompt)
 
     async with db.get_pool().acquire() as conn:
         async with conn.transaction():

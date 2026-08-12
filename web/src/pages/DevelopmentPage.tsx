@@ -229,7 +229,7 @@ export default function DevelopmentPage() {
   const { can } = usePermissions()
   const canView = can('roles:manage')
   const canAgent = can('development:read')
-  const [tab, setTab] = useTabParam<Tab>(TABS, 'issues')
+  const [tab, setTab] = useTabParam<Tab>(TABS, 'agent')
   const [agentCount, setAgentCount] = useState<number | null>(null)
   // Stable identity so AgentTab's refresh callback doesn't re-fire every render.
   const onAgentCount = useCallback((n: number) => setAgentCount(n), [])
