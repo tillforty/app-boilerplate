@@ -22,14 +22,9 @@
 	reverse_proxy web:80
 }
 
-# GlitchTip error monitoring — served on its own subdomain when
-# GLITCHTIP_PUBLIC_DOMAIN is set (e.g. errors.tillforty.com). Add a DNS A record
-# for that host pointing at this server and Caddy auto-provisions its TLS cert.
-# GlitchTip is a root-path app (its own /api and /assets), so it needs a
-# dedicated hostname — it can't live under a subpath of {$DOMAIN}. When the var
-# is unset this binds a harmless internal-only address (never publicly exposed).
-{$GLITCHTIP_PUBLIC_DOMAIN:http://localhost:9998} {
-	{$CADDY_TLS}
-	encode gzip
-	reverse_proxy glitchtip:8080
-}
+# NOTE: GlitchTip is reached via its published port (http://DOMAIN:GLITCHTIP_PORT),
+# not through Caddy — so there is intentionally no GlitchTip site block here. To
+# instead expose it on a dedicated TLS subdomain, add a block like the one above
+# with reverse_proxy glitchtip:8080 and set GLITCHTIP_PUBLIC_DOMAIN + its DNS.
+# (Don't template it off an env var that may be empty — an empty address makes
+# Caddy read the block as keyless global config and refuse to start.)
