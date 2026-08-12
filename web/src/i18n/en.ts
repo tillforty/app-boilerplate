@@ -167,6 +167,8 @@ export interface Dictionary {
   agent: Record<
     | 'newJob' | 'newJobHint' | 'titleGenerated'
     | 'prompt' | 'promptPlaceholder' | 'start' | 'starting'
+    | 'attachments' | 'attach' | 'attachHint' | 'removeFile' | 'downloadFile'
+    | 'fileTooLarge' | 'filesTooLarge' | 'tooManyFiles'
     | 'jobsEmpty' | 'jobsEmptyTitle'
     | 'pendingTitle' | 'deployedTitle' | 'deployedEmpty' | 'deployedEmptyTitle'
     | 'colJob' | 'colAgent' | 'colStatus' | 'colPr' | 'colDeployed' | 'colCreated'
@@ -584,6 +586,15 @@ export const en: Dictionary = {
     promptPlaceholder: 'e.g. Add a CSV export button to the customers table.',
     start: 'Start job',
     starting: 'Starting…',
+    attachments: 'Attachments',
+    attach: 'Attach files',
+    attachHint:
+      'Screenshots or files the agent should look at — up to {max}, {size} each.',
+    removeFile: 'Remove',
+    downloadFile: 'Download',
+    fileTooLarge: '{name} is larger than {size}.',
+    filesTooLarge: 'The attachments add up to more than {size}.',
+    tooManyFiles: 'At most {max} files can be attached to one job.',
     jobsEmpty: 'Jobs you start will appear here with their progress.',
     jobsEmptyTitle: 'No jobs yet',
     pendingTitle: 'Pending deploy',

@@ -2,9 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import {
   AlertTriangle,
   Bot,
+  Download,
   ExternalLink,
   GitPullRequest,
   MessageCircleQuestion,
+  Paperclip,
   Pencil,
   Plus,
   RefreshCw,
@@ -12,6 +14,7 @@ import {
   Rocket,
   Ban,
   RotateCcw,
+  X,
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { useTranslation } from '@/i18n'
@@ -23,6 +26,8 @@ import {
   cancelJob,
   createJob,
   createRelease,
+  downloadJobFile,
+  fetchJobFile,
   getDevConfig,
   getJob,
   listReleases,
@@ -30,10 +35,14 @@ import {
   listJobs,
   retryJob,
   updateJobPrompt,
+  MAX_JOB_FILES,
+  MAX_JOB_FILE_BYTES,
+  MAX_JOB_FILES_TOTAL_BYTES,
   type Release,
   type DevConfig,
   type Job,
   type JobDetail,
+  type JobFile,
   type JobStatus,
 } from '@/lib/development'
 import { cn } from '@/lib/utils'
@@ -96,6 +105,12 @@ function fmt(dt: string | null): string {
   return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString()
 }
 
+function fmtSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
 function JobStatusBadge({ status }: { status: JobStatus }) {
   const { t } = useTranslation()
   return (
@@ -140,6 +155,160 @@ function DeployedCell({ release }: { release: Release | undefined }) {
           .join(' · ')}
       </div>
     </div>
+  )
+}
+
+/** One file waiting to be uploaded, previewed so the right screenshot is sent. */
+function PickedFile({ file, onRemove }: { file: File; onRemove: () => void }) {
+  const { t } = useTranslation()
+  const [preview, setPreview] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!file.type.startsWith('image/')) return
+    const url = URL.createObjectURL(file)
+    setPreview(url)
+    return () => URL.revokeObjectURL(url)
+  }, [file])
+
+  return (
+    <li className="flex items-center gap-2 rounded-md border bg-muted/40 px-2 py-1 text-sm">
+      {preview ? (
+        <img src={preview} alt="" className="h-8 w-8 shrink-0 rounded object-cover" />
+      ) : (
+        <Paperclip className="h-4 w-4 shrink-0 text-muted-foreground" />
+      )}
+      <span className="min-w-0 flex-1 truncate">{file.name}</span>
+      <span className="shrink-0 text-xs text-muted-foreground">{fmtSize(file.size)}</span>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="h-6 w-6 shrink-0"
+        title={t('agent.removeFile')}
+        onClick={onRemove}
+      >
+        <X className="h-3.5 w-3.5" />
+      </Button>
+    </li>
+  )
+}
+
+/** The attach button plus the list of files picked so far, shared by the prompt
+ *  and answer dialogs. Ceilings are checked here as well as in the API, so an
+ *  oversized screenshot fails instantly instead of after the upload. */
+function AttachmentPicker({
+  files,
+  onChange,
+}: {
+  files: File[]
+  onChange: (files: File[]) => void
+}) {
+  const { t } = useTranslation()
+  const inputRef = useRef<HTMLInputElement>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  function onPick(e: React.ChangeEvent<HTMLInputElement>) {
+    const picked = Array.from(e.target.files ?? [])
+    e.target.value = ''
+    if (picked.length === 0) return
+    setError(null)
+
+    const tooBig = picked.find((f) => f.size > MAX_JOB_FILE_BYTES)
+    if (tooBig) {
+      setError(t('agent.fileTooLarge', { name: tooBig.name, size: fmtSize(MAX_JOB_FILE_BYTES) }))
+      return
+    }
+    const next = [...files, ...picked]
+    if (next.length > MAX_JOB_FILES) {
+      setError(t('agent.tooManyFiles', { max: MAX_JOB_FILES }))
+      return
+    }
+    if (next.reduce((sum, f) => sum + f.size, 0) > MAX_JOB_FILES_TOTAL_BYTES) {
+      setError(t('agent.filesTooLarge', { size: fmtSize(MAX_JOB_FILES_TOTAL_BYTES) }))
+      return
+    }
+    onChange(next)
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <Label>{t('agent.attachments')}</Label>
+        <Button type="button" variant="outline" size="sm" onClick={() => inputRef.current?.click()}>
+          <Paperclip className="mr-2 h-4 w-4" />
+          {t('agent.attach')}
+        </Button>
+      </div>
+      <input ref={inputRef} type="file" multiple className="hidden" onChange={onPick} />
+      {files.length > 0 && (
+        <ul className="space-y-1">
+          {files.map((file, index) => (
+            <PickedFile
+              key={`${file.name}-${index}`}
+              file={file}
+              onRemove={() => {
+                setError(null)
+                onChange(files.filter((_, i) => i !== index))
+              }}
+            />
+          ))}
+        </ul>
+      )}
+      <p className="text-xs text-muted-foreground">
+        {error ? (
+          <span className="text-destructive">{error}</span>
+        ) : (
+          t('agent.attachHint', { max: MAX_JOB_FILES, size: fmtSize(MAX_JOB_FILE_BYTES) })
+        )}
+      </p>
+    </div>
+  )
+}
+
+/** An attachment already stored with the job. The route is authenticated, so
+ *  both the thumbnail and the download go through fetch, not a plain href. */
+function StoredFile({ jobId, file }: { jobId: number; file: JobFile }) {
+  const { t } = useTranslation()
+  const [preview, setPreview] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!file.mime?.startsWith('image/')) return
+    let url: string | null = null
+    let cancelled = false
+    void fetchJobFile(jobId, file.id)
+      .then((blob) => {
+        if (cancelled) return
+        url = URL.createObjectURL(blob)
+        setPreview(url)
+      })
+      // A missing thumbnail is not worth an error banner; the download still works.
+      .catch(() => undefined)
+    return () => {
+      cancelled = true
+      if (url) URL.revokeObjectURL(url)
+    }
+  }, [jobId, file.id, file.mime])
+
+  return (
+    <li className="flex items-center gap-2 rounded-md border bg-muted/40 px-2 py-1 text-sm">
+      {preview ? (
+        <img src={preview} alt={file.name} className="h-8 w-8 shrink-0 rounded object-cover" />
+      ) : (
+        <Paperclip className="h-4 w-4 shrink-0 text-muted-foreground" />
+      )}
+      <span className="min-w-0 flex-1 truncate">{file.name}</span>
+      <span className="shrink-0 text-xs text-muted-foreground">{fmtSize(file.size)}</span>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="h-6 w-6 shrink-0"
+        title={t('agent.downloadFile')}
+        onClick={() => void downloadJobFile(jobId, file)}
+      >
+        <Download className="h-3.5 w-3.5" />
+      </Button>
+    </li>
   )
 }
 
@@ -205,12 +374,14 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
 
   const [newOpen, setNewOpen] = useState(false)
   const [prompt, setPrompt] = useState('')
+  const [files, setFiles] = useState<File[]>([])
   const [submitting, setSubmitting] = useState(false)
 
   const [editFor, setEditFor] = useState<Job | null>(null)
   const [editPrompt, setEditPrompt] = useState('')
   const [answerFor, setAnswerFor] = useState<Job | null>(null)
   const [answer, setAnswer] = useState('')
+  const [answerFiles, setAnswerFiles] = useState<File[]>([])
   const [detail, setDetail] = useState<JobDetail | null>(null)
   const [busyId, setBusyId] = useState<number | null>(null)
   const [releasing, setReleasing] = useState(false)
@@ -269,15 +440,20 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
     return () => clearInterval(id)
   }, [hasLive, refresh])
 
+  function closeNew() {
+    setNewOpen(false)
+    setFiles([])
+  }
+
   async function onCreate(e: FormEvent) {
     e.preventDefault()
     if (!prompt.trim()) return
     setSubmitting(true)
     setError(null)
     try {
-      await createJob({ prompt: prompt.trim() })
+      await createJob({ prompt: prompt.trim(), files })
       setPrompt('')
-      setNewOpen(false)
+      closeNew()
       await refresh()
     } catch (err) {
       setError(err instanceof Error ? err.message : t('agent.createFailed'))
@@ -298,6 +474,12 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
     } finally {
       setBusyId(null)
     }
+  }
+
+  function closeAnswer() {
+    setAnswerFor(null)
+    setAnswer('')
+    setAnswerFiles([])
   }
 
   /** Ship every merged function in one rebuild. */
@@ -328,9 +510,9 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
     if (!answerFor || !answer.trim()) return
     const job = answerFor
     const text = answer.trim()
-    setAnswerFor(null)
-    setAnswer('')
-    await act(job.id, () => answerJob(job.id, text), t('agent.answerFailed'))
+    const attached = answerFiles
+    closeAnswer()
+    await act(job.id, () => answerJob(job.id, text, attached), t('agent.answerFailed'))
   }
 
   if (loading) return <p className="text-sm text-muted-foreground">{t('common.loading')}</p>
@@ -361,6 +543,15 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
           >
             {job.title}
           </button>
+          {job.files.length > 0 && (
+            <span
+              className="ml-2 inline-flex items-center gap-1 align-middle text-xs text-muted-foreground"
+              title={job.files.map((f) => f.name).join(', ')}
+            >
+              <Paperclip className="h-3 w-3" />
+              {job.files.length}
+            </span>
+          )}
           {job.error && <div className="truncate text-xs text-destructive">{job.error}</div>}
         </TableCell>
         <TableCell className="whitespace-nowrap text-muted-foreground">
@@ -565,7 +756,7 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
       </div>
 
       {/* ── New job ─────────────────────────────────────────────────────── */}
-      <Dialog open={newOpen} onOpenChange={setNewOpen}>
+      <Dialog open={newOpen} onOpenChange={(o) => (o ? setNewOpen(true) : closeNew())}>
         <DialogContent>
           <form onSubmit={onCreate}>
             <DialogHeader>
@@ -591,9 +782,13 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
                 onChange={(e) => setPrompt(e.target.value)}
               />
               <p className="text-xs text-muted-foreground">{t('agent.titleGenerated')}</p>
+
+              <div className="pt-2">
+                <AttachmentPicker files={files} onChange={setFiles} />
+              </div>
             </div>
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setNewOpen(false)}>
+              <Button type="button" variant="outline" onClick={closeNew}>
                 {t('common.cancel')}
               </Button>
               <Button type="submit" disabled={!canSubmit || submitting}>
@@ -634,7 +829,7 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
       </Dialog>
 
       {/* ── Answer the agent's question ─────────────────────────────────── */}
-      <Dialog open={answerFor !== null} onOpenChange={(o) => !o && setAnswerFor(null)}>
+      <Dialog open={answerFor !== null} onOpenChange={(o) => !o && closeAnswer()}>
         <DialogContent>
           <form onSubmit={onAnswer}>
             <DialogHeader>
@@ -654,9 +849,10 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
                   onChange={(e) => setAnswer(e.target.value)}
                 />
               </div>
+              <AttachmentPicker files={answerFiles} onChange={setAnswerFiles} />
             </div>
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setAnswerFor(null)}>
+              <Button type="button" variant="outline" onClick={closeAnswer}>
                 {t('common.cancel')}
               </Button>
               <Button type="submit" disabled={!answer.trim()}>
@@ -690,6 +886,18 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
                 {detail?.prompt}
               </p>
             </div>
+            {detail && detail.files.length > 0 && (
+              <div className="space-y-1">
+                <p className="text-xs font-medium text-muted-foreground">
+                  {t('agent.attachments')}
+                </p>
+                <ul className="space-y-1">
+                  {detail.files.map((file) => (
+                    <StoredFile key={file.id} jobId={detail.id} file={file} />
+                  ))}
+                </ul>
+              </div>
+            )}
             {detail?.events?.length ? (
               <div className="space-y-1">
                 <p className="text-xs font-medium text-muted-foreground">{t('agent.timeline')}</p>
