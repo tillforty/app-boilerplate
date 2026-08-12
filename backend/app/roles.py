@@ -35,6 +35,9 @@ PERMISSION_CATALOG: list[dict] = [
     {"resource": "customers", "label": "Customers", "actions": ["read", "create", "update", "delete"]},
     {"resource": "emails", "label": "Emails", "actions": ["read", "sync", "delete", "configure"]},
     {"resource": "ai", "label": "AI", "actions": ["use", "manage"]},
+    # Development agent: read = see jobs/deployments, run = queue + answer jobs,
+    # deploy = merge a PR and rebuild the server, manage = repo/token settings.
+    {"resource": "development", "label": "Development", "actions": ["read", "run", "deploy", "manage"]},
 ]
 
 ALL_PERMISSIONS = {f"{g['resource']}:{a}" for g in PERMISSION_CATALOG for a in g["actions"]}

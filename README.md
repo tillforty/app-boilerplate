@@ -605,6 +605,68 @@ answer = await llm.complete([
 
 ---
 
+## Development agent (automated jobs → PR → deploy)
+
+**Development › Agent** turns a written request into a merged, deployed change
+with as few manual steps as possible:
+
+```
+prompt → Pending → Building → [Answer pending ⇄ Building] → Deployment ready
+       → (click Deploy) → Deploying → Deployed
+```
+
+The agent works on a branch, opens a pull request, and stops. Nothing reaches
+your base branch until someone clicks **Deploy**, which merges the PR and
+rebuilds this server. Every deployed version is kept in the history table with
+its PR number linked to GitHub.
+
+**Which CLI runs** is decided by *Settings › App › AI functions* → *Development
+agent*: bind it to a **Claude (Anthropic)** connection to use Claude Code, or an
+**OpenAI** connection to use Codex. Leave the model blank for the CLI default.
+
+**Where the repo comes from** is *Settings › App › Development*: the
+`owner/name` repository, base branch, a GitHub token (stored encrypted in the
+vault), and the deploy switch. **Validate access** probes the whole pipeline
+before you run a job — token accepted, pull, push, base branch exists, PRs, merge
+(including branch-protection), runner reachable, deploy target correct.
+
+### Turning it on
+
+```bash
+# .env
+AGENT_ENABLED=true
+APP_CHECKOUT_PATH=/opt/app-boilerplate   # pulled + rebuilt on Deploy
+```
+
+then `./start.sh`. Configure the repo and token in the UI — they are runtime
+settings, not env vars.
+
+### How it is wired
+
+| Piece | Where | Notes |
+|---|---|---|
+| API | `backend/app/devagent.py` | Config, validation, jobs, deployments. Never shells out. |
+| Worker | `agent-runner/runner.py` | Clones, runs the CLI, pushes, opens/merges PRs, deploys. |
+| Schema | `migrations/0012_dev_agent.sql` | `dev_settings`, `dev_jobs`, `dev_job_events`, `dev_deployments`. |
+| UI | `web/src/components/development/AgentTab.tsx` | Jobs + deployment history. |
+| Settings UI | `web/src/components/settings/DevelopmentTab.tsx` | Repo, token, deploy switch, checks. |
+
+Permissions: `development:read` (see jobs), `development:run` (queue + answer),
+`development:deploy` (merge + rebuild), `development:manage` (repo/token
+settings). The administrator role holds `*` and gets all four.
+
+**Questions instead of guesses.** The agent is instructed to write
+`.agent/QUESTION.md` and stop when a decision is genuinely the requester's. The
+job then sits at **Answer pending**; your answer is replayed into the next run,
+so context is preserved. That file is never committed.
+
+> ⚠️ **Security.** The runner mounts the Docker socket (root-equivalent on this
+> host) and executes code written by an LLM. The coding CLI itself runs as an
+> unprivileged `agent` user, and deploys are off until you enable them — but
+> leave `AGENT_ENABLED=false` unless you want one-click deploys.
+
+---
+
 ## Frontend — consuming the UI kit in an app
 
 1. **Point the app at the registry.** Copy `components.json.example` to

@@ -24,21 +24,23 @@ from .roles import require_permission
 router = APIRouter(prefix="/llm", tags=["llm"])
 
 # ── Provider + model catalog (drives the UI selects) ─────────────────────────
-# Capabilities: "chat" (completions) and "embeddings". Anthropic has no
-# embeddings endpoint, so the embeddings function only accepts OpenAI providers.
+# Capabilities: "chat" (completions), "embeddings", and "coding_agent" (a
+# headless coding CLI — Codex for OpenAI, Claude Code for Anthropic). Anthropic
+# has no embeddings endpoint, so the embeddings function only accepts OpenAI.
 PROVIDERS: list[dict] = [
     {
         "key": "openai",
         "label": "OpenAI",
-        "capabilities": ["chat", "embeddings"],
+        "capabilities": ["chat", "embeddings", "coding_agent"],
         "supports_base_url": True,
         "chat_models": ["gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-4.1-mini", "o3-mini"],
         "embedding_models": ["text-embedding-3-small", "text-embedding-3-large"],
+        "coding_models": ["gpt-5-codex", "gpt-5", "o4-mini"],
     },
     {
         "key": "anthropic",
         "label": "Claude (Anthropic)",
-        "capabilities": ["chat"],
+        "capabilities": ["chat", "coding_agent"],
         "supports_base_url": False,
         "chat_models": [
             "claude-opus-4-8",
@@ -47,6 +49,7 @@ PROVIDERS: list[dict] = [
             "claude-fable-5",
         ],
         "embedding_models": [],
+        "coding_models": ["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5"],
     },
 ]
 _PROVIDER_KEYS = {p["key"] for p in PROVIDERS}
@@ -67,6 +70,16 @@ AI_FUNCTIONS: list[dict] = [
         "label": "Semantic search embeddings",
         "capability": "embeddings",
         "description": "Vectorizes records for pgvector semantic search. OpenAI-compatible only.",
+    },
+    {
+        "key": "development_agent",
+        "label": "Development agent",
+        "capability": "coding_agent",
+        "description": (
+            "Builds Development › Agent jobs into a pull request. The provider "
+            "picks the CLI: Claude (Anthropic) → Claude Code, OpenAI → Codex. "
+            "Leave the model blank to use the CLI's own default."
+        ),
     },
 ]
 _FUNCTION_KEYS = {f["key"] for f in AI_FUNCTIONS}

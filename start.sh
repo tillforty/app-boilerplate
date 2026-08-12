@@ -217,6 +217,7 @@ API_PORT="$(grep -E '^API_PORT=' .env | cut -d= -f2 || true)"; API_PORT="${API_P
 DOMAIN="$(grep -E '^DOMAIN=' .env | cut -d= -f2 || true)"
 N8N_ENABLED="$(grep -E '^N8N_ENABLED=' .env | cut -d= -f2 || true)"
 GLITCHTIP_ENABLED="$(grep -E '^GLITCHTIP_ENABLED=' .env | cut -d= -f2 || true)"
+AGENT_ENABLED="$(grep -E '^AGENT_ENABLED=' .env | cut -d= -f2 || true)"
 
 PROFILES=""
 if [ -n "${DOMAIN:-}" ]; then
@@ -230,6 +231,10 @@ fi
 if [ "${GLITCHTIP_ENABLED:-false}" = "true" ]; then
   PROFILES="${PROFILES:+$PROFILES,}glitchtip"
   info "GLITCHTIP_ENABLED=true — GlitchTip + its Postgres/Redis/worker will start (~1GB RAM)."
+fi
+if [ "${AGENT_ENABLED:-false}" = "true" ]; then
+  PROFILES="${PROFILES:+$PROFILES,}agent"
+  info "AGENT_ENABLED=true — the development agent runner will start (it mounts the Docker socket)."
 fi
 if [ -n "$PROFILES" ]; then
   export COMPOSE_PROFILES="$PROFILES"

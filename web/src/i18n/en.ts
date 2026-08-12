@@ -122,7 +122,7 @@ export interface Dictionary {
   >
   settings: Record<
     | 'title' | 'subtitle' | 'save' | 'saved' | 'loadFailed' | 'saveFailed' | 'noPermission'
-    | 'tabGeneral' | 'tabLlm' | 'tabFunctions',
+    | 'tabGeneral' | 'tabLlm' | 'tabFunctions' | 'tabDevelopment',
     string
   >
   llm: Record<
@@ -147,6 +147,42 @@ export interface Dictionary {
     | 'setupTitle' | 'setupIntro' | 'openGlitchtip' | 'redeployNote'
     | 'step1Title' | 'step1Desc' | 'step2Title' | 'step2Desc'
     | 'step3Title' | 'step3Desc' | 'step4Title' | 'step4Desc',
+    string
+  >
+  /** Settings › App › Development — repo, token, deploy switch, access checks. */
+  devSettings: Record<
+    | 'subtitle' | 'loadFailed' | 'saveFailed' | 'validateFailed' | 'saved' | 'tokenCleared'
+    | 'repoSection' | 'repo' | 'repoHint' | 'baseBranch' | 'baseBranchHint'
+    | 'token' | 'tokenHint' | 'tokenStored' | 'tokenPlaceholder' | 'clearToken'
+    | 'deploySection' | 'deployEnabled' | 'deployEnabledHint'
+    | 'checkoutPath' | 'checkoutPathHint'
+    | 'runnerOnline' | 'runnerOffline' | 'runnerOfflineHint'
+    | 'validate' | 'validating' | 'saveFirst'
+    | 'checksTitle' | 'checksPass' | 'checksFail' | 'lastChecked'
+    | 'check_repo' | 'check_token' | 'check_pull' | 'check_push' | 'check_base_branch'
+    | 'check_pull_request' | 'check_merge' | 'check_runner' | 'check_deploy',
+    string
+  >
+  /** Development › Agent — automated coding jobs and deployment history. */
+  agent: Record<
+    | 'newJob' | 'newJobHint' | 'titleGenerated'
+    | 'prompt' | 'promptPlaceholder' | 'start' | 'starting'
+    | 'jobsTitle' | 'jobsEmpty' | 'jobsEmptyTitle'
+    | 'colJob' | 'colAgent' | 'colStatus' | 'colPr' | 'colCreated'
+    | 'status_pending' | 'status_running' | 'status_answer_pending'
+    | 'status_deployment_ready' | 'status_deploying' | 'status_deployed'
+    | 'status_failed' | 'status_cancelled'
+    | 'agent_claude_code' | 'agent_codex'
+    | 'answer' | 'answerTitle' | 'answerHint' | 'yourAnswer' | 'sendAnswer' | 'answerFailed'
+    | 'deploy' | 'deployDisabled' | 'deployFailed'
+    | 'retry' | 'retryFailed' | 'cancelFailed'
+    | 'deploymentsTitle' | 'deploymentsEmpty' | 'deploymentsEmptyTitle'
+    | 'colVersion' | 'colChange' | 'colBy' | 'colDeployedAt'
+    | 'deployStatus_pending' | 'deployStatus_merging' | 'deployStatus_deploying'
+    | 'deployStatus_deployed' | 'deployStatus_failed'
+    | 'timeline' | 'log' | 'openPr' | 'close'
+    | 'loadFailed' | 'createFailed'
+    | 'setupNoRepo' | 'setupNoKey' | 'setupNoAgent' | 'setupNoRunner' | 'setupLink',
     string
   >
 }
@@ -408,6 +444,7 @@ export const en: Dictionary = {
     tabGeneral: 'General',
     tabLlm: 'LLM credentials',
     tabFunctions: 'AI functions',
+    tabDevelopment: 'Development',
   },
   llm: {
     subtitle: 'Provider connections. API keys are stored encrypted and never shown again.',
@@ -491,5 +528,113 @@ export const en: Dictionary = {
     step4Title: 'Set the org and project slugs',
     step4Desc:
       'Set SENTRY_ORG_SLUG and SENTRY_PROJECT_SLUG in .env (from the project’s URL/settings), then redeploy.',
+  },
+  devSettings: {
+    subtitle:
+      'Point the development agent at a GitHub repository, then check that it can pull, push, open pull requests, merge, and deploy.',
+    loadFailed: 'Failed to load the development settings',
+    saveFailed: 'Failed to save',
+    validateFailed: 'Validation failed',
+    saved: 'Saved.',
+    tokenCleared: 'GitHub token removed.',
+    repoSection: 'Repository',
+    repo: 'GitHub repository',
+    repoHint: 'In owner/name form, e.g. tillforty/app-boilerplate. This is the repo the agent builds in.',
+    baseBranch: 'Base branch',
+    baseBranchHint: 'Pull requests are opened against this branch, and deploys merge into it.',
+    token: 'GitHub access token',
+    tokenHint:
+      'Needs read/write access to the repository’s contents and pull requests. Stored encrypted; never shown again.',
+    tokenStored: '•••••••• (stored)',
+    tokenPlaceholder: 'ghp_… or github_pat_…',
+    clearToken: 'Remove stored token',
+    deploySection: 'Deployment',
+    deployEnabled: 'Allow one-click deploys',
+    deployEnabledHint:
+      'When on, Deploy merges the pull request and rebuilds this server. Leave off to merge manually instead.',
+    checkoutPath: 'Server checkout path',
+    checkoutPathHint: 'The directory on this server that is pulled and rebuilt when you deploy.',
+    runnerOnline: 'Agent runner online',
+    runnerOffline: 'Agent runner offline',
+    runnerOfflineHint: 'Set AGENT_ENABLED=true in .env and run ./start.sh.',
+    validate: 'Validate access',
+    validating: 'Checking…',
+    saveFirst: 'Save a repository first.',
+    checksTitle: 'Access checks',
+    checksPass: 'Ready',
+    checksFail: 'Needs attention',
+    lastChecked: 'Last checked {when}',
+    check_repo: 'Repository configured',
+    check_token: 'Token accepted',
+    check_pull: 'Pull (read the code)',
+    check_push: 'Push (write a branch)',
+    check_base_branch: 'Base branch exists',
+    check_pull_request: 'Open pull requests',
+    check_merge: 'Merge into the base branch',
+    check_runner: 'Agent runner reachable',
+    check_deploy: 'Deploy target ready',
+  },
+  agent: {
+    newJob: 'New job',
+    newJobHint:
+      'Describe what you want built. The agent works on a branch and opens a pull request when it’s done.',
+    titleGenerated: 'The job title is written for you from this prompt.',
+    prompt: 'Prompt',
+    promptPlaceholder: 'e.g. Add a CSV export button to the customers table.',
+    start: 'Start job',
+    starting: 'Starting…',
+    jobsTitle: 'Jobs',
+    jobsEmpty: 'Jobs you start will appear here with their progress.',
+    jobsEmptyTitle: 'No jobs yet',
+    colJob: 'Job',
+    colAgent: 'Agent',
+    colStatus: 'Status',
+    colPr: 'Pull request',
+    colCreated: 'Created',
+    status_pending: 'Pending',
+    status_running: 'Building',
+    status_answer_pending: 'Answer pending',
+    status_deployment_ready: 'Deployment ready',
+    status_deploying: 'Deploying',
+    status_deployed: 'Deployed',
+    status_failed: 'Failed',
+    status_cancelled: 'Cancelled',
+    agent_claude_code: 'Claude Code',
+    agent_codex: 'OpenAI Codex',
+    answer: 'Answer',
+    answerTitle: 'The agent has a question',
+    answerHint: 'Answer it and the job continues from where it stopped.',
+    yourAnswer: 'Your answer',
+    sendAnswer: 'Send and continue',
+    answerFailed: 'Failed to send the answer',
+    deploy: 'Deploy',
+    deployDisabled: 'Deploys are switched off in Settings › App › Development.',
+    deployFailed: 'Failed to start the deploy',
+    retry: 'Retry',
+    retryFailed: 'Failed to retry the job',
+    cancelFailed: 'Failed to cancel the job',
+    deploymentsTitle: 'Deployed versions',
+    deploymentsEmpty: 'Every version you deploy is recorded here.',
+    deploymentsEmptyTitle: 'Nothing deployed yet',
+    colVersion: 'Version',
+    colChange: 'Change',
+    colBy: 'Deployed by',
+    colDeployedAt: 'When',
+    deployStatus_pending: 'Queued',
+    deployStatus_merging: 'Merging',
+    deployStatus_deploying: 'Deploying',
+    deployStatus_deployed: 'Deployed',
+    deployStatus_failed: 'Failed',
+    timeline: 'Timeline',
+    log: 'Log',
+    openPr: 'Open pull request',
+    close: 'Close',
+    loadFailed: 'Failed to load jobs',
+    createFailed: 'Failed to start the job',
+    setupNoRepo: 'No GitHub repository or token is configured.',
+    setupNoKey: 'The selected development agent connection has no API key.',
+    setupNoAgent: 'No development agent is selected under AI functions.',
+    setupNoRunner: 'The agent runner is not running, so jobs will stay pending.',
+    setupLink: 'Open settings',
   },
 }

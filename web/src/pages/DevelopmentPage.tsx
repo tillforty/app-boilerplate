@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { CheckCircle2, Circle, ExternalLink, RefreshCw } from 'lucide-react'
 import { useTabParam } from '@/lib/use-tab-param'
 import { usePermissions } from '@/context/PermissionsContext'
@@ -22,6 +22,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { TableEmptyState } from '@/components/ui/table-empty-state'
+import AgentTab from '@/components/development/AgentTab'
 
 const TABS = ['agent', 'issues', 'support'] as const
 type Tab = (typeof TABS)[number]
@@ -227,7 +228,11 @@ export default function DevelopmentPage() {
   const { t } = useTranslation()
   const { can } = usePermissions()
   const canView = can('roles:manage')
-  const [tab, setTab] = useTabParam<Tab>(TABS, 'issues')
+  const canAgent = can('development:read')
+  const [tab, setTab] = useTabParam<Tab>(TABS, 'agent')
+  const [agentCount, setAgentCount] = useState<number | null>(null)
+  // Stable identity so AgentTab's refresh callback doesn't re-fire every render.
+  const onAgentCount = useCallback((n: number) => setAgentCount(n), [])
 
   const [setup, setSetup] = useState<DevSetupStatus | null>(null)
   const [issues, setIssues] = useState<Issue[] | null>(null)
@@ -265,8 +270,9 @@ export default function DevelopmentPage() {
     }
   }, [canView, reloadKey, t])
 
-  // Tab badges. Agent/Support are placeholders (no data yet) → 0.
+  // Tab badges. Support is still a placeholder (no data yet) → 0.
   const issuesBadge = issues !== null ? String(issues.length) : ''
+  const agentBadge = agentCount !== null ? String(agentCount) : ''
 
   return (
     <div className="mx-auto max-w-content space-y-6">
@@ -277,7 +283,10 @@ export default function DevelopmentPage() {
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)}>
         <TabsList>
-          <TabsTrigger value="agent">{t('development.tabAgent')} (0)</TabsTrigger>
+          <TabsTrigger value="agent">
+            {t('development.tabAgent')}
+            {agentBadge !== '' && ` (${agentBadge})`}
+          </TabsTrigger>
           <TabsTrigger value="issues">
             {t('development.tabIssues')}
             {issuesBadge !== '' && ` (${issuesBadge})`}
@@ -285,7 +294,11 @@ export default function DevelopmentPage() {
           <TabsTrigger value="support">{t('development.tabSupport')} (0)</TabsTrigger>
         </TabsList>
         <TabsContent value="agent">
-          <ComingSoon />
+          {canAgent ? (
+            <AgentTab onCount={onAgentCount} />
+          ) : (
+            <p className="text-sm text-muted-foreground">{t('development.noPermission')}</p>
+          )}
         </TabsContent>
         <TabsContent value="issues">
           <IssuesTab
