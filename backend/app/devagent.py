@@ -89,7 +89,7 @@ async def ensure_schema() -> None:
                 agent        text NOT NULL CHECK (agent IN ('claude_code', 'codex')),
                 model        text,
                 status       text NOT NULL DEFAULT 'pending'
-                             CHECK (status IN ('pending', 'running', 'answer_pending',
+                             CHECK (status IN ('pending', 'running', 'answer_pending', 'merged',
                                                'deployment_ready', 'deploying', 'deployed',
                                                'failed', 'cancelled')),
                 branch       text,
@@ -135,6 +135,24 @@ async def ensure_schema() -> None:
                 finished_at   timestamptz
             );
             CREATE INDEX IF NOT EXISTS dev_deployments_created_idx ON dev_deployments (created_at DESC);
+
+            ALTER TABLE dev_jobs ADD COLUMN IF NOT EXISTS release_id bigint
+                REFERENCES dev_deployments(id) ON DELETE SET NULL;
+            ALTER TABLE dev_jobs ADD COLUMN IF NOT EXISTS merged_at timestamptz;
+            ALTER TABLE dev_jobs ADD COLUMN IF NOT EXISTS merge_requested boolean NOT NULL DEFAULT false;
+            CREATE INDEX IF NOT EXISTS dev_jobs_release_idx ON dev_jobs (release_id);
+            ALTER TABLE dev_deployments ADD COLUMN IF NOT EXISTS release_number integer;
+            ALTER TABLE dev_deployments ADD COLUMN IF NOT EXISTS job_count integer NOT NULL DEFAULT 0;
+            """
+        )
+        # Widen the status CHECK for installs created before releases existed.
+        await conn.execute("ALTER TABLE dev_jobs DROP CONSTRAINT IF EXISTS dev_jobs_status_check")
+        await conn.execute(
+            """
+            ALTER TABLE dev_jobs ADD CONSTRAINT dev_jobs_status_check CHECK (
+                status IN ('pending', 'running', 'answer_pending', 'merged',
+                           'deployment_ready', 'deploying', 'deployed', 'failed', 'cancelled')
+            )
             """
         )
 
@@ -500,6 +518,8 @@ class Job(BaseModel):
     question: str | None
     error: str | None
     attempts: int
+    merged_at: datetime | None = None
+    release_id: int | None = None
     created_by_name: str | None = None
     created_at: datetime
     started_at: datetime | None
@@ -538,6 +558,8 @@ def _to_job(row) -> Job:
         question=row["question"],
         error=row["error"],
         attempts=row["attempts"],
+        merged_at=row["merged_at"],
+        release_id=row["release_id"],
         created_by_name=row["created_by_name"],
         created_at=row["created_at"],
         started_at=row["started_at"],
@@ -813,40 +835,44 @@ async def cancel_job(
 
 
 # ── Deployments ──────────────────────────────────────────────────────────────
-class Deployment(BaseModel):
+class ReleaseJob(BaseModel):
+    """One function included in a release, for the history table's PR labels."""
+
     id: int
-    job_id: int | None
-    job_title: str | None = None
+    title: str
     pr_number: int | None
     pr_url: str | None
-    merge_sha: str | None
+
+
+class Release(BaseModel):
+    id: int
+    release_number: int | None
     version_label: str | None
     status: str
+    job_count: int
+    jobs: list[ReleaseJob] = []
     error: str | None
     deployed_by_name: str | None = None
     created_at: datetime
     finished_at: datetime | None
 
 
-_DEPLOYMENT_SELECT = """
-    SELECT d.*, j.title AS job_title,
+_RELEASE_SELECT = """
+    SELECT d.*,
            NULLIF(TRIM(COALESCE(u.name, '') || ' ' || COALESCE(u.surname, '')), '') AS deployed_by_name
     FROM dev_deployments d
-    LEFT JOIN dev_jobs j ON j.id = d.job_id
     LEFT JOIN users u ON u.id = d.deployed_by
 """
 
 
-def _to_deployment(row) -> Deployment:
-    return Deployment(
+def _to_release(row, jobs: list[ReleaseJob] | None = None) -> Release:
+    return Release(
         id=row["id"],
-        job_id=row["job_id"],
-        job_title=row["job_title"],
-        pr_number=row["pr_number"],
-        pr_url=row["pr_url"],
-        merge_sha=row["merge_sha"],
+        release_number=row["release_number"],
         version_label=row["version_label"],
         status=row["status"],
+        job_count=row["job_count"],
+        jobs=jobs or [],
         error=row["error"],
         deployed_by_name=row["deployed_by_name"],
         created_at=row["created_at"],
@@ -854,27 +880,65 @@ def _to_deployment(row) -> Deployment:
     )
 
 
-@router.get("/deployments", response_model=list[Deployment])
-async def list_deployments(
+@router.get("/releases", response_model=list[Release])
+async def list_releases(
     limit: int = Query(default=50, ge=1, le=200),
     _: UserOut = Depends(require_permission("development:read")),
-) -> list[Deployment]:
-    """History of every version that was shipped, newest first."""
+) -> list[Release]:
+    """History of every release that was shipped, newest first, each listing the
+    functions it carried so the PR numbers stay traceable."""
     rows = await db.get_pool().fetch(
-        f"{_DEPLOYMENT_SELECT} ORDER BY d.created_at DESC LIMIT $1", limit
+        f"{_RELEASE_SELECT} ORDER BY d.created_at DESC LIMIT $1", limit
     )
-    return [_to_deployment(r) for r in rows]
+    if not rows:
+        return []
+    job_rows = await db.get_pool().fetch(
+        """
+        SELECT id, title, pr_number, pr_url, release_id FROM dev_jobs
+        WHERE release_id = ANY($1::bigint[]) ORDER BY id
+        """,
+        [r["id"] for r in rows],
+    )
+    by_release: dict[int, list[ReleaseJob]] = {}
+    for j in job_rows:
+        by_release.setdefault(j["release_id"], []).append(
+            ReleaseJob(id=j["id"], title=j["title"], pr_number=j["pr_number"], pr_url=j["pr_url"])
+        )
+    return [_to_release(r, by_release.get(r["id"], [])) for r in rows]
 
 
-@router.post("/jobs/{job_id}/deploy", response_model=Deployment, status_code=status.HTTP_202_ACCEPTED)
-async def deploy_job(
+@router.post("/jobs/{job_id}/merge", response_model=Job)
+async def request_merge(
     job_id: int,
-    user: UserOut = Depends(require_permission("development:deploy")),
-) -> Deployment:
-    """Merge the job's PR and rebuild this server.
+    _: UserOut = Depends(require_permission("development:run")),
+) -> Job:
+    """Retry an auto-merge that failed. Merging normally happens by itself the
+    moment the agent finishes, so this is only for the exception."""
+    row = await db.get_pool().fetchrow(
+        "SELECT status, pr_number FROM dev_jobs WHERE id = $1", job_id
+    )
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Job not found")
+    if row["status"] != "deployment_ready" or row["pr_number"] is None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "This job has no open pull request awaiting a merge."
+        )
+    await db.get_pool().execute(
+        "UPDATE dev_jobs SET merge_requested = true, error = NULL, updated_at = now() WHERE id = $1",
+        job_id,
+    )
+    return _to_job(await db.get_pool().fetchrow(f"{_JOB_SELECT} WHERE j.id = $1", job_id))
 
-    Returns immediately with a `pending` deployment; the runner does the merge
-    and the rebuild, then flips the row (and the job) to `deployed` or `failed`.
+
+@router.post("/releases", response_model=Release, status_code=status.HTTP_202_ACCEPTED)
+async def create_release(
+    user: UserOut = Depends(require_permission("development:deploy")),
+) -> Release:
+    """Ship everything that is merged but not yet deployed, in one rebuild.
+
+    The release is whatever is on the base branch right now: each merged job is
+    stamped with this release id up front, so a job merged *after* the button is
+    pressed waits for the next one rather than being silently claimed by this.
     """
     config = await _config_row()
     if not config["deploy_enabled"]:
@@ -890,37 +954,44 @@ async def deploy_job(
 
     async with db.get_pool().acquire() as conn:
         async with conn.transaction():
-            job = await conn.fetchrow("SELECT * FROM dev_jobs WHERE id = $1 FOR UPDATE", job_id)
-            if job is None:
-                raise HTTPException(status.HTTP_404_NOT_FOUND, "Job not found")
-            if job["status"] != "deployment_ready":
+            pending = await conn.fetch(
+                "SELECT id FROM dev_jobs WHERE status = 'merged' FOR UPDATE"
+            )
+            if not pending:
                 raise HTTPException(
-                    status.HTTP_409_CONFLICT, "This job has no pull request ready to deploy."
+                    status.HTTP_409_CONFLICT, "Nothing is merged and waiting to be deployed."
                 )
-            if job["pr_number"] is None:
-                raise HTTPException(status.HTTP_409_CONFLICT, "This job has no pull request.")
-
-            dep = await conn.fetchrow(
+            next_number = await conn.fetchval(
+                "SELECT COALESCE(MAX(release_number), 0) + 1 FROM dev_deployments"
+            )
+            rel = await conn.fetchrow(
                 """
                 INSERT INTO dev_deployments
-                    (job_id, pr_number, pr_url, version_label, status, deployed_by)
-                VALUES ($1, $2, $3, $4, 'pending', $5)
+                    (release_number, version_label, status, job_count, deployed_by)
+                VALUES ($1, $2, 'pending', $3, $4)
                 RETURNING *
                 """,
-                job_id,
-                job["pr_number"],
-                job["pr_url"],
-                f"PR #{job['pr_number']}",
+                next_number,
+                f"Release #{next_number}",
+                len(pending),
                 user.id,
             )
             await conn.execute(
-                "UPDATE dev_jobs SET status = 'deploying', updated_at = now() WHERE id = $1",
-                job_id,
+                """
+                UPDATE dev_jobs SET status = 'deploying', release_id = $1, updated_at = now()
+                WHERE status = 'merged'
+                """,
+                rel["id"],
             )
-            await conn.execute(
-                "INSERT INTO dev_job_events (job_id, kind, message) VALUES ($1, 'deploy', $2)",
-                job_id,
-                f"Deploy requested by {user.name or user.email}.",
-            )
-    full = await db.get_pool().fetchrow(f"{_DEPLOYMENT_SELECT} WHERE d.id = $1", dep["id"])
-    return _to_deployment(full)
+            for j in pending:
+                await conn.execute(
+                    "INSERT INTO dev_job_events (job_id, kind, message) VALUES ($1, 'deploy', $2)",
+                    j["id"],
+                    f"Included in release #{next_number}, requested by {user.name or user.email}.",
+                )
+    full = await db.get_pool().fetchrow(f"{_RELEASE_SELECT} WHERE d.id = $1", rel["id"])
+    jobs = await db.get_pool().fetch(
+        "SELECT id, title, pr_number, pr_url FROM dev_jobs WHERE release_id = $1 ORDER BY id",
+        rel["id"],
+    )
+    return _to_release(full, [ReleaseJob(**dict(j)) for j in jobs])

@@ -8,6 +8,7 @@ import {
   Pencil,
   Plus,
   RefreshCw,
+  GitMerge,
   Rocket,
   Ban,
   RotateCcw,
@@ -19,14 +20,15 @@ import {
   answerJob,
   cancelJob,
   createJob,
-  deployJob,
+  createRelease,
   getDevConfig,
   getJob,
-  listDeployments,
+  listReleases,
+  requestMerge,
   listJobs,
   retryJob,
   updateJobPrompt,
-  type Deployment,
+  type Release,
   type DevConfig,
   type Job,
   type JobDetail,
@@ -37,6 +39,7 @@ import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
+import { StatusBadge } from '@/components/ui/status-badge'
 import {
   Dialog,
   DialogContent,
@@ -69,6 +72,8 @@ const STATUS_CLASS: Record<JobStatus, string> = {
     'bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-400/15 dark:text-blue-300 dark:border-blue-400/25',
   answer_pending:
     'bg-amber-100 text-amber-800 border-amber-200 dark:bg-amber-400/15 dark:text-amber-300 dark:border-amber-400/25',
+  merged:
+    'bg-teal-100 text-teal-700 border-teal-200 dark:bg-teal-400/15 dark:text-teal-300 dark:border-teal-400/25',
   deployment_ready:
     'bg-violet-100 text-violet-700 border-violet-200 dark:bg-violet-400/15 dark:text-violet-300 dark:border-violet-400/25',
   deploying:
@@ -81,18 +86,24 @@ const STATUS_CLASS: Record<JobStatus, string> = {
     'bg-zinc-100 text-zinc-600 border-zinc-200 dark:bg-zinc-400/15 dark:text-zinc-400 dark:border-zinc-400/25',
 }
 
+/** States that are still progressing, so their pill spins. Declared rather than
+ *  matched on "-ing", which would only ever animate the English labels. */
+const ACTIVE: JobStatus[] = ['pending', 'running', 'deploying']
+
 function fmt(dt: string | null): string {
   if (!dt) return '—'
   const d = new Date(dt)
   return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString()
 }
 
-function StatusBadge({ status }: { status: JobStatus }) {
+function JobStatusBadge({ status }: { status: JobStatus }) {
   const { t } = useTranslation()
   return (
-    <Badge variant="outline" className={cn('font-medium', STATUS_CLASS[status])}>
-      {t(`agent.status_${status}`)}
-    </Badge>
+    <StatusBadge
+      label={t(`agent.status_${status}`)}
+      active={ACTIVE.includes(status)}
+      className={STATUS_CLASS[status]}
+    />
   )
 }
 
@@ -115,17 +126,15 @@ function PrLink({ number, url }: { number: number | null; url: string | null }) 
   )
 }
 
-/** The shipped version of a job: merged commit, who deployed it and when.
- *  Empty for jobs that were never deployed. */
-function DeployedCell({ dep }: { dep: Deployment | undefined }) {
-  if (!dep) return <span className="text-muted-foreground">—</span>
+/** The release that shipped this job — several functions share one. Empty for
+ *  anything not deployed yet. */
+function DeployedCell({ release }: { release: Release | undefined }) {
+  if (!release) return <span className="text-muted-foreground">—</span>
   return (
     <div className="whitespace-nowrap">
-      <div className="font-mono text-xs">
-        {dep.merge_sha ? dep.merge_sha.slice(0, 8) : (dep.version_label ?? '—')}
-      </div>
+      <div className="text-xs font-medium">{release.version_label ?? '—'}</div>
       <div className="text-xs text-muted-foreground">
-        {[dep.deployed_by_name, fmt(dep.finished_at ?? dep.created_at)]
+        {[release.deployed_by_name, fmt(release.finished_at ?? release.created_at)]
           .filter(Boolean)
           .join(' · ')}
       </div>
@@ -189,7 +198,7 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
 
   const [config, setConfig] = useState<DevConfig | null>(null)
   const [jobs, setJobs] = useState<Job[]>([])
-  const [deployments, setDeployments] = useState<Deployment[]>([])
+  const [releases, setReleases] = useState<Release[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -203,6 +212,7 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
   const [answer, setAnswer] = useState('')
   const [detail, setDetail] = useState<JobDetail | null>(null)
   const [busyId, setBusyId] = useState<number | null>(null)
+  const [releasing, setReleasing] = useState(false)
 
   // Guards against a slow in-flight refresh overwriting fresher state.
   const mounted = useRef(true)
@@ -215,11 +225,11 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
 
   const refresh = useCallback(async () => {
     try {
-      const [c, j, d] = await Promise.all([getDevConfig(), listJobs(), listDeployments()])
+      const [c, j, d] = await Promise.all([getDevConfig(), listJobs(), listReleases()])
       if (!mounted.current) return
       setConfig(c)
       setJobs(j)
-      setDeployments(d)
+      setReleases(d)
       setError(null)
       onCount?.(j.length)
     } catch (e) {
@@ -237,18 +247,16 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
   const hasLive = useMemo(
     () =>
       jobs.some((j) => LIVE.includes(j.status)) ||
-      deployments.some((d) => d.status === 'pending' || d.status === 'merging' || d.status === 'deploying'),
-    [jobs, deployments],
+      releases.some((r) => r.status === 'pending' || r.status === 'merging' || r.status === 'deploying'),
+    [jobs, releases],
   )
-  /** Newest deployment per job, so a job row can show the version it shipped.
-   *  The list arrives newest-first, so the first hit for a job wins. */
-  const depByJob = useMemo(() => {
-    const map = new Map<number, Deployment>()
-    for (const d of deployments) {
-      if (d.job_id !== null && !map.has(d.job_id)) map.set(d.job_id, d)
-    }
-    return map
-  }, [deployments])
+  /** Release lookup, so a job row can name the version that shipped it. */
+  const releaseById = useMemo(
+    () => new Map(releases.map((r) => [r.id, r])),
+    [releases],
+  )
+  /** Merged and waiting: the batch the next release would ship. */
+  const readyCount = useMemo(() => jobs.filter((j) => j.status === 'merged').length, [jobs])
 
   useEffect(() => {
     if (!hasLive) return
@@ -284,6 +292,20 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
       setError(err instanceof Error ? err.message : fallback)
     } finally {
       setBusyId(null)
+    }
+  }
+
+  /** Ship every merged function in one rebuild. */
+  async function onRelease() {
+    setReleasing(true)
+    setError(null)
+    try {
+      await createRelease()
+      await refresh()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('agent.releaseFailed'))
+    } finally {
+      setReleasing(false)
     }
   }
 
@@ -324,6 +346,33 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
       )}
 
       {config && <SetupNotice config={config} />}
+
+      {/* Merged work waits here until someone ships it — one rebuild for the
+          whole batch, rather than one per function. */}
+      {readyCount > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-4 rounded-md border border-teal-500/50 bg-teal-500/10 px-4 py-3 text-sm">
+          <div className="flex items-center gap-3">
+            <Rocket className="h-4 w-4 shrink-0 text-teal-600 dark:text-teal-400" />
+            <span>
+              {t('agent.readyCount', { count: readyCount })}
+              <span className="ml-1 text-muted-foreground">{t('agent.readyHint')}</span>
+            </span>
+          </div>
+          {canDeploy && (
+            <Button
+              type="button"
+              size="sm"
+              className="shrink-0"
+              disabled={releasing || !config?.deploy_enabled}
+              title={config?.deploy_enabled ? undefined : t('agent.deployDisabled')}
+              onClick={() => void onRelease()}
+            >
+              <Rocket className="mr-2 h-4 w-4" />
+              {releasing ? t('agent.deploying') : t('agent.deployAll', { count: readyCount })}
+            </Button>
+          )}
+        </div>
+      )}
 
       {/* ── Jobs ────────────────────────────────────────────────────────── */}
       <div className="space-y-3">
@@ -391,13 +440,13 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
                       {t(`agent.agent_${job.agent}`)}
                     </TableCell>
                     <TableCell>
-                      <StatusBadge status={job.status} />
+                      <JobStatusBadge status={job.status} />
                     </TableCell>
                     <TableCell>
                       <PrLink number={job.pr_number} url={job.pr_url} />
                     </TableCell>
                     <TableCell>
-                      <DeployedCell dep={depByJob.get(job.id)} />
+                      <DeployedCell release={job.release_id ? releaseById.get(job.release_id) : undefined} />
                     </TableCell>
                     <TableCell className="whitespace-nowrap text-muted-foreground">
                       {fmt(job.created_at)}
@@ -434,18 +483,18 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
                             {t('agent.answer')}
                           </Button>
                         )}
-                        {job.status === 'deployment_ready' && canDeploy && (
+                        {job.status === 'deployment_ready' && canRun && (
                           <Button
                             type="button"
                             size="sm"
                             disabled={busyId === job.id || !config?.deploy_enabled}
                             title={config?.deploy_enabled ? undefined : t('agent.deployDisabled')}
                             onClick={() =>
-                              void act(job.id, () => deployJob(job.id), t('agent.deployFailed'))
+                              void act(job.id, () => requestMerge(job.id), t('agent.mergeFailed'))
                             }
                           >
-                            <Rocket className="mr-2 h-4 w-4" />
-                            {t('agent.deploy')}
+                            <GitMerge className="mr-2 h-4 w-4" />
+                            {t('agent.retryMerge')}
                           </Button>
                         )}
                         {(job.status === 'failed' || job.status === 'cancelled') && canRun && (

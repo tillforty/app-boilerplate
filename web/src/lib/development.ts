@@ -49,6 +49,9 @@ export type JobStatus =
   | 'pending'
   | 'running'
   | 'answer_pending'
+  /** Merged into the base branch, waiting for the next release. */
+  | 'merged'
+  /** PR is open but the automatic merge did not succeed — needs a human. */
   | 'deployment_ready'
   | 'deploying'
   | 'deployed'
@@ -122,6 +125,8 @@ export interface Job {
   question: string | null
   error: string | null
   attempts: number
+  merged_at: string | null
+  release_id: number | null
   created_by_name: string | null
   created_at: string
   started_at: string | null
@@ -133,15 +138,22 @@ export interface JobDetail extends Job {
   events: JobEvent[]
 }
 
-export interface Deployment {
+/** One function carried by a release. */
+export interface ReleaseJob {
   id: number
-  job_id: number | null
-  job_title: string | null
+  title: string
   pr_number: number | null
   pr_url: string | null
-  merge_sha: string | null
+}
+
+/** A release ships every merged function in a single rebuild. */
+export interface Release {
+  id: number
+  release_number: number | null
   version_label: string | null
   status: 'pending' | 'merging' | 'deploying' | 'deployed' | 'failed'
+  job_count: number
+  jobs: ReleaseJob[]
   error: string | null
   deployed_by_name: string | null
   created_at: string
@@ -166,8 +178,12 @@ export const answerJob = (id: number, answer: string) =>
   api.post<Job>(`/development/jobs/${id}/answer`, { answer })
 export const retryJob = (id: number) => api.post<Job>(`/development/jobs/${id}/retry`, {})
 export const cancelJob = (id: number) => api.post<Job>(`/development/jobs/${id}/cancel`, {})
-export const deployJob = (id: number) =>
-  api.post<Deployment>(`/development/jobs/${id}/deploy`, {})
+/** Retry an auto-merge that failed; merging is otherwise automatic. */
+export const requestMerge = (id: number) =>
+  api.post<Job>(`/development/jobs/${id}/merge`, {})
 
-export const listDeployments = (limit = 50) =>
-  api.get<Deployment[]>(`/development/deployments?limit=${limit}`)
+/** Ship everything merged-but-not-deployed in one rebuild. */
+export const createRelease = () => api.post<Release>('/development/releases', {})
+
+export const listReleases = (limit = 50) =>
+  api.get<Release[]>(`/development/releases?limit=${limit}`)

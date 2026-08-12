@@ -250,9 +250,14 @@ async def _deploy_forever() -> None:
     while True:
         try:
             await reconcile_deployments(pool)
-            dep = await claim_deployment(pool)
-            if dep is not None:
-                await run_deployment(pool, dep)
+            job = await claim_merge_retry(pool)
+            if job is not None:
+                await retry_merge(pool, job)
+                continue
+
+            rel = await claim_release(pool)
+            if rel is not None:
+                await run_release(pool, rel)
                 continue
         except Exception:  # noqa: BLE001 — deploys must outlive any single failure
             log("deploy worker error:\n" + traceback.format_exc())
@@ -553,6 +558,32 @@ async def run_job(pool, job) -> None:
         await event(pool, job_id, "pr", f"Opened PR #{pr_json['number']}.")
         log(f"job {job_id} → PR #{pr_json['number']}")
 
+        # Merge straight away. The job is "built" once it is on the base branch;
+        # shipping it is a separate, batched decision the operator makes later.
+        merged_job = await pool.fetchrow("SELECT * FROM dev_jobs WHERE id = $1", job_id)
+        ok, merge_sha, detail = await merge_pr(pool, merged_job, repo, token, base_branch)
+        if ok:
+            await pool.execute(
+                """
+                UPDATE dev_jobs SET status = 'merged', commit_sha = COALESCE($2, commit_sha),
+                                    merged_at = now(), error = NULL, updated_at = now()
+                WHERE id = $1
+                """,
+                job_id, merge_sha,
+            )
+            await event(pool, job_id, "merged",
+                        f"Merged PR #{pr_json['number']} — waiting for the next release.")
+            log(f"job {job_id} merged (PR #{pr_json['number']})")
+        else:
+            # The PR stands; it just needs a human. 'deployment_ready' now means
+            # exactly that: open, not merged.
+            await pool.execute(
+                "UPDATE dev_jobs SET error = $2, updated_at = now() WHERE id = $1",
+                job_id, detail[:2000],
+            )
+            await event(pool, job_id, "failed", detail)
+            log(f"job {job_id}: auto-merge failed — {detail}")
+
     except Exception:  # noqa: BLE001 — a crash here must not kill the worker
         await fail_job(pool, job_id, "The runner crashed while processing this job.",
                        "\n".join(transcript) + "\n" + traceback.format_exc())
@@ -604,7 +635,7 @@ Rules:
 """
 
 
-async def resolve_conflicts(pool, dep, repo: str, token: str, base_branch: str) -> tuple[bool, str]:
+async def resolve_conflicts(pool, job, repo: str, token: str, base_branch: str) -> tuple[bool, str]:
     """Merge the base branch into the PR branch, letting the coding agent settle
     any conflicts, then push. Returns (resolved, detail).
 
@@ -612,12 +643,9 @@ async def resolve_conflicts(pool, dep, repo: str, token: str, base_branch: str) 
     mergeable individually, and the first merge is what makes the second one
     conflict. That only surfaces at deploy time, so the fix has to live here.
     """
-    job_id = dep["job_id"]
-    if job_id is None:
-        return False, "Deployment has no job to rebuild from."
-    job = await pool.fetchrow("SELECT * FROM dev_jobs WHERE id = $1", job_id)
-    if job is None or not job["branch"]:
-        return False, "Job or branch is gone, so the conflict can't be resolved."
+    job_id = job["id"]
+    if not job["branch"]:
+        return False, "The job has no branch, so the conflict can't be resolved."
 
     provider = "anthropic" if job["agent"] == "claude_code" else "openai"
     api_key = await resolve_agent_key(pool, provider)
@@ -625,7 +653,7 @@ async def resolve_conflicts(pool, dep, repo: str, token: str, base_branch: str) 
         return False, "No agent API key available to resolve the conflict."
 
     branch = job["branch"]
-    workdir = os.path.join(WORKSPACE, f"conflict-{dep['id']}")
+    workdir = os.path.join(WORKSPACE, f"conflict-{job_id}")
     shutil.rmtree(workdir, ignore_errors=True)
     os.makedirs(workdir, exist_ok=True)
     shutil.chown(workdir, user=AGENT_USER, group=AGENT_USER)
@@ -681,12 +709,20 @@ async def resolve_conflicts(pool, dep, repo: str, token: str, base_branch: str) 
             return False, f"The agent exited {proc.returncode} while resolving the conflict."
 
         # Never ship a file that still carries markers, whatever the agent claims.
+        # Scan ONLY the files that were conflicted, and match only the two markers
+        # git always writes with a label after them. A bare `=======` line is not
+        # evidence: it is ordinary Markdown heading underlining, which made this
+        # check fail resolutions that were in fact correct.
         left = git(["diff", "--name-only", "--diff-filter=U"], cwd=workdir, timeout=60,
                    user=AGENT_USER).stdout.strip()
-        grep = run(["grep", "-rlE", r"^(<{7}|={7}|>{7})( |$)", workdir, "--exclude-dir=.git"],
-                   timeout=120)
-        if left or grep.stdout.strip():
-            return False, "Conflict markers were still present after the agent ran."
+        still_marked = [
+            f for f in conflicted
+            if run(["grep", "-lE", r"^(<{7}|>{7}) ", os.path.join(workdir, f)],
+                   timeout=30).returncode == 0
+        ]
+        if left or still_marked:
+            detail = ", ".join(still_marked) if still_marked else left.replace("\n", ", ")
+            return False, f"Conflict markers were still present after the agent ran ({detail})."
 
         git(["add", "-A"], cwd=workdir, timeout=120, user=AGENT_USER)
         commit = git(["commit", "-m", f"Merge {base_branch} into {branch} (conflicts resolved by agent)"],
@@ -702,10 +738,115 @@ async def resolve_conflicts(pool, dep, repo: str, token: str, base_branch: str) 
         shutil.rmtree(workdir, ignore_errors=True)
 
 
-async def claim_deployment(pool):
+async def merge_pr(pool, job, repo: str, token: str, base_branch: str) -> tuple[bool, str | None, str]:
+    """Merge a finished job's PR into the base branch. Returns (ok, sha, detail).
+
+    Merging happens as soon as the agent finishes, not at deploy time. Two jobs
+    branched from the same commit are each mergeable on their own, and it is the
+    FIRST merge that strands the second — so merging early, one job at a time,
+    keeps conflicts small and lets the agent resolve them while its work is still
+    the only thing in flight.
+    """
+    job_id, pr_number = job["id"], job["pr_number"]
+    if pr_number is None:
+        return False, None, "The job has no pull request to merge."
+
+    async with httpx.AsyncClient(timeout=30) as c:
+        current = await c.get(
+            f"{GITHUB_API}/repos/{repo}/pulls/{pr_number}", headers=gh_headers(token)
+        )
+    if current.status_code == 200 and current.json().get("merged"):
+        return True, current.json().get("merge_commit_sha"), "Already merged."
+
+    merge_body = {
+        "merge_method": os.environ.get("AGENT_MERGE_METHOD", "squash"),
+        "commit_title": f"PR #{pr_number}: {job['title']}"[:250],
+    }
+    merge = await gh_put(token, f"/repos/{repo}/pulls/{pr_number}/merge", merge_body)
+
+    if merge.status_code != 200:
+        detail = merge.json().get("message", merge.text[:300]) if merge.text else merge.text
+        if "conflict" not in detail.lower() and merge.status_code != 405:
+            return False, None, f"GitHub refused to merge PR #{pr_number}: {detail}"
+
+        log(f"job {job_id}: PR #{pr_number} conflicts — resolving")
+        await event(pool, job_id, "conflict", "Merge conflict; the agent is resolving it…")
+        resolved, why = await resolve_conflicts(pool, job, repo, token, base_branch)
+        if not resolved:
+            return False, None, f"PR #{pr_number} has conflicts that couldn't be resolved: {why}"
+
+        # GitHub recomputes mergeability asynchronously after a push.
+        merge = None
+        for _ in range(10):
+            await asyncio.sleep(3)
+            async with httpx.AsyncClient(timeout=30) as c:
+                pr = await c.get(
+                    f"{GITHUB_API}/repos/{repo}/pulls/{pr_number}", headers=gh_headers(token)
+                )
+            if pr.status_code == 200 and pr.json().get("mergeable") is True:
+                merge = await gh_put(token, f"/repos/{repo}/pulls/{pr_number}/merge", merge_body)
+                break
+        if merge is None or merge.status_code != 200:
+            again = merge.json().get("message", "") if merge is not None and merge.text else "still not mergeable"
+            return False, None, f"PR #{pr_number} wouldn't merge after resolving: {again}"
+
+    return True, merge.json().get("sha"), "Merged."
+
+
+async def claim_merge_retry(pool):
+    """A job whose auto-merge failed and that an operator asked to retry."""
     return await pool.fetchrow(
         """
-        UPDATE dev_deployments SET status = 'merging'
+        UPDATE dev_jobs SET merge_requested = false, updated_at = now()
+        WHERE id = (
+            SELECT id FROM dev_jobs
+            WHERE merge_requested AND status = 'deployment_ready' AND pr_number IS NOT NULL
+            ORDER BY updated_at LIMIT 1 FOR UPDATE SKIP LOCKED
+        )
+        RETURNING *
+        """
+    )
+
+
+async def retry_merge(pool, job) -> None:
+    """Re-attempt the merge (conflicts and all) for a job that needed a nudge."""
+    job_id = job["id"]
+    log(f"job {job_id}: retrying merge of PR #{job['pr_number']}")
+    config = await load_config(pool)
+    token = await get_secret(pool, TOKEN_SECRET_NAME)
+    repo = config["repo_full_name"]
+    if not repo or not token:
+        await pool.execute(
+            "UPDATE dev_jobs SET error = $2, updated_at = now() WHERE id = $1",
+            job_id, "Repository or GitHub token is not configured.",
+        )
+        return
+    ok, merge_sha, detail = await merge_pr(pool, job, repo, token, config["base_branch"])
+    if ok:
+        await pool.execute(
+            """
+            UPDATE dev_jobs SET status = 'merged', commit_sha = COALESCE($2, commit_sha),
+                                merged_at = now(), error = NULL, updated_at = now()
+            WHERE id = $1
+            """,
+            job_id, merge_sha,
+        )
+        await event(pool, job_id, "merged", "Merged — waiting for the next release.")
+    else:
+        await pool.execute(
+            "UPDATE dev_jobs SET error = $2, updated_at = now() WHERE id = $1",
+            job_id, detail[:2000],
+        )
+        await event(pool, job_id, "failed", detail)
+    log(f"job {job_id}: merge retry {'succeeded' if ok else 'failed'}")
+
+
+async def claim_release(pool):
+    """Releases are the only kind of deployment now: rebuild whatever is on the
+    base branch and stamp every merged job as shipped."""
+    return await pool.fetchrow(
+        """
+        UPDATE dev_deployments SET status = 'deploying'
         WHERE id = (
             SELECT id FROM dev_deployments WHERE status = 'pending'
             ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED
@@ -715,135 +856,59 @@ async def claim_deployment(pool):
     )
 
 
-async def finish_deployment(pool, dep_id: int, job_id: int | None, ok: bool,
-                            error: str | None = None, log_text: str = "") -> None:
-    await pool.execute(
-        """
-        UPDATE dev_deployments SET status = $2, error = $3, log = $4, finished_at = now()
-        WHERE id = $1
-        """,
-        dep_id, "deployed" if ok else "failed", (error or None), tail(log_text),
-    )
-    if job_id is not None:
-        # A failed deploy leaves the PR ready to try again, not stuck "deploying".
-        await pool.execute(
-            """
-            UPDATE dev_jobs SET status = $2, error = $3, updated_at = now()
-            WHERE id = $1
-            """,
-            job_id, "deployed" if ok else "deployment_ready", (None if ok else error),
-        )
-        await event(pool, job_id, "deployed" if ok else "failed",
-                    "Deployed." if ok else f"Deploy failed: {error}")
-    log(f"deployment {dep_id} {'succeeded' if ok else 'failed'}")
+async def finish_release(pool, rel_id: int, ok: bool, error: str | None = None,
+                         log_text: str = "") -> None:
+    """Close out a release and move every job it covered to its final state."""
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute(
+                """
+                UPDATE dev_deployments SET status = $2, error = $3, log = $4, finished_at = now()
+                WHERE id = $1
+                """,
+                rel_id, "deployed" if ok else "failed", (error or None), tail(log_text),
+            )
+            if ok:
+                await conn.execute(
+                    """
+                    UPDATE dev_jobs SET status = 'deployed', error = NULL, updated_at = now()
+                    WHERE release_id = $1
+                    """,
+                    rel_id,
+                )
+            else:
+                # A failed release puts its jobs back in the queue rather than
+                # stranding them in 'deploying' — they are still merged.
+                await conn.execute(
+                    """
+                    UPDATE dev_jobs SET status = 'merged', release_id = NULL,
+                                        error = $2, updated_at = now()
+                    WHERE release_id = $1
+                    """,
+                    rel_id, error,
+                )
+    jobs = await pool.fetch("SELECT id FROM dev_jobs WHERE release_id = $1", rel_id)
+    for j in jobs:
+        await event(pool, j["id"], "deployed" if ok else "failed",
+                    "Deployed." if ok else f"Release failed: {error}")
+    log(f"release {rel_id} {'succeeded' if ok else 'failed'}")
 
 
-async def run_deployment(pool, dep) -> None:
-    """Merge the PR, then hand the host rebuild to a detached sibling container."""
-    dep_id, job_id = dep["id"], dep["job_id"]
-    log(f"deployment {dep_id} claimed (PR #{dep['pr_number']})")
+async def run_release(pool, rel) -> None:
+    """Pull the base branch and rebuild the stack once, for every merged job."""
+    rel_id = rel["id"]
+    log(f"release {rel_id} claimed ({rel['job_count']} job(s))")
 
     config = await load_config(pool)
-    repo = config["repo_full_name"]
     token = await get_secret(pool, TOKEN_SECRET_NAME)
-    if not repo or not token:
-        return await finish_deployment(pool, dep_id, job_id, False,
-                                       "Repository or GitHub token is not configured.")
     if not config["deploy_enabled"]:
-        return await finish_deployment(pool, dep_id, job_id, False, "Deploy is switched off.")
-
-    job_title = None
-    if job_id is not None:
-        job_title = await pool.fetchval("SELECT title FROM dev_jobs WHERE id = $1", job_id)
+        return await finish_release(pool, rel_id, False, "Deploy is switched off.")
+    if not token:
+        return await finish_release(pool, rel_id, False, "GitHub token is not configured.")
 
     try:
-        # Merging is the one step that isn't safely repeatable, so check first.
-        # This also makes recovery cheap: a run interrupted between the merge and
-        # the rebuild is simply re-claimed and picks up from here.
-        async with httpx.AsyncClient(timeout=30) as c:
-            current = await c.get(
-                f"{GITHUB_API}/repos/{repo}/pulls/{dep['pr_number']}", headers=gh_headers(token)
-            )
-        already_merged = current.status_code == 200 and current.json().get("merged")
-
-        if already_merged:
-            merge_sha = current.json().get("merge_commit_sha")
-            log(f"deployment {dep_id}: PR #{dep['pr_number']} was already merged")
-        else:
-            merge = await gh_put(
-                token, f"/repos/{repo}/pulls/{dep['pr_number']}/merge",
-                {
-                    "merge_method": os.environ.get("AGENT_MERGE_METHOD", "squash"),
-                    "commit_title": f"{dep['version_label']}: {job_title or 'agent change'}"[:250],
-                },
-            )
-            if merge.status_code != 200:
-                detail = merge.json().get("message", merge.text[:300]) if merge.text else merge.text
-                # A conflict here is the normal cost of two jobs branching from
-                # the same commit: whichever merges first strands the other. Send
-                # the agent back in to settle it, then merge again.
-                if "conflict" in detail.lower() or merge.status_code == 405:
-                    log(f"deployment {dep_id}: PR #{dep['pr_number']} conflicts — resolving")
-                    await pool.execute(
-                        "UPDATE dev_deployments SET error = $2 WHERE id = $1",
-                        dep_id, "Merge conflict — the agent is resolving it…",
-                    )
-                    resolved, why = await resolve_conflicts(
-                        pool, dep, repo, token, config["base_branch"]
-                    )
-                    if not resolved:
-                        return await finish_deployment(
-                            pool, dep_id, job_id, False,
-                            f"PR #{dep['pr_number']} has conflicts that couldn't be resolved: {why}",
-                        )
-                    # GitHub recomputes mergeability asynchronously after a push.
-                    merge = None
-                    for attempt in range(10):
-                        await asyncio.sleep(3)
-                        async with httpx.AsyncClient(timeout=30) as c:
-                            pr = await c.get(
-                                f"{GITHUB_API}/repos/{repo}/pulls/{dep['pr_number']}",
-                                headers=gh_headers(token),
-                            )
-                        if pr.status_code == 200 and pr.json().get("mergeable") is True:
-                            merge = await gh_put(
-                                token, f"/repos/{repo}/pulls/{dep['pr_number']}/merge",
-                                {
-                                    "merge_method": os.environ.get("AGENT_MERGE_METHOD", "squash"),
-                                    "commit_title":
-                                        f"{dep['version_label']}: {job_title or 'agent change'}"[:250],
-                                },
-                            )
-                            break
-                    if merge is None or merge.status_code != 200:
-                        again = (
-                            merge.json().get("message", "")
-                            if merge is not None and merge.text else "still not mergeable"
-                        )
-                        return await finish_deployment(
-                            pool, dep_id, job_id, False,
-                            f"PR #{dep['pr_number']} still wouldn't merge after resolving: {again}",
-                        )
-                    await pool.execute(
-                        "UPDATE dev_deployments SET error = NULL WHERE id = $1", dep_id
-                    )
-                    if job_id is not None:
-                        await event(pool, job_id, "conflict", why)
-                else:
-                    return await finish_deployment(
-                        pool, dep_id, job_id, False,
-                        f"GitHub refused to merge PR #{dep['pr_number']}: {detail}",
-                    )
-            merge_sha = merge.json().get("sha")
-        await pool.execute(
-            "UPDATE dev_deployments SET merge_sha = $2, status = 'deploying' WHERE id = $1",
-            dep_id, merge_sha,
-        )
-        if job_id is not None:
-            await event(pool, job_id, "merged", f"Merged PR #{dep['pr_number']} ({(merge_sha or '')[:8]}).")
-
         checkout = CHECKOUT_PATH
-        container_name = f"tillforty-deploy-{dep_id}"
+        container_name = f"tillforty-deploy-{rel_id}"
         run(["docker", "rm", "-f", container_name], timeout=60)
         # NOT --rm: the exit code must survive for reconcile_deployments to read,
         # since ./start.sh restarts this very runner mid-deploy.
@@ -866,21 +931,20 @@ async def run_deployment(pool, dep) -> None:
             timeout=120,
         )
         if started.returncode != 0:
-            return await finish_deployment(
-                pool, dep_id, job_id, False,
-                "Could not start the deploy container.",
+            return await finish_release(
+                pool, rel_id, False, "Could not start the deploy container.",
                 started.stdout + started.stderr,
             )
         container_id = started.stdout.strip()
         await pool.execute(
-            "UPDATE dev_deployments SET container_id = $2 WHERE id = $1", dep_id, container_id
+            "UPDATE dev_deployments SET container_id = $2 WHERE id = $1", rel_id, container_id
         )
-        log(f"deployment {dep_id}: rebuild running in {container_name} ({container_id[:12]})")
+        log(f"release {rel_id}: rebuild running in {container_name} ({container_id[:12]})")
         # From here on it's reconcile_deployments' job — this process may be
         # restarted by the very rebuild it just launched.
     except Exception:  # noqa: BLE001
-        await finish_deployment(pool, dep_id, job_id, False,
-                                "The runner crashed while deploying.", traceback.format_exc())
+        await finish_release(pool, rel_id, False,
+                             "The runner crashed while deploying.", traceback.format_exc())
 
 
 async def reconcile_deployments(pool) -> None:
@@ -894,21 +958,21 @@ async def reconcile_deployments(pool) -> None:
             ["docker", "inspect", "-f", "{{.State.Status}} {{.State.ExitCode}}", cid], timeout=60
         )
         if inspect.returncode != 0:
-            await finish_deployment(pool, dep["id"], dep["job_id"], False,
-                                    "The deploy container disappeared before it reported a result.")
+            await finish_release(pool, dep["id"], False,
+                                 "The deploy container disappeared before it reported a result.")
             continue
         state, _, code = inspect.stdout.strip().partition(" ")
         if state == "running":
             age = (datetime.now(timezone.utc) - dep["created_at"]).total_seconds()
             if age > DEPLOY_TIMEOUT:
                 run(["docker", "rm", "-f", cid], timeout=60)
-                await finish_deployment(pool, dep["id"], dep["job_id"], False,
-                                        f"The deploy timed out after {DEPLOY_TIMEOUT}s.")
+                await finish_release(pool, dep["id"], False,
+                                     f"The deploy timed out after {DEPLOY_TIMEOUT}s.")
             continue
         logs = run(["docker", "logs", "--tail", "400", cid], timeout=60)
         ok = code.strip() == "0"
-        await finish_deployment(
-            pool, dep["id"], dep["job_id"], ok,
+        await finish_release(
+            pool, dep["id"], ok,
             None if ok else f"The rebuild exited with code {code.strip()}.",
             logs.stdout + logs.stderr,
         )

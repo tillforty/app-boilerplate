@@ -169,13 +169,15 @@ export interface Dictionary {
     | 'prompt' | 'promptPlaceholder' | 'start' | 'starting'
     | 'jobsEmpty' | 'jobsEmptyTitle'
     | 'colJob' | 'colAgent' | 'colStatus' | 'colPr' | 'colDeployed' | 'colCreated'
-    | 'status_pending' | 'status_running' | 'status_answer_pending'
+    | 'status_pending' | 'status_running' | 'status_answer_pending' | 'status_merged'
     | 'status_deployment_ready' | 'status_deploying' | 'status_deployed'
     | 'status_failed' | 'status_cancelled'
     | 'agent_claude_code' | 'agent_codex'
     | 'answer' | 'answerTitle' | 'answerHint' | 'yourAnswer' | 'sendAnswer' | 'answerFailed'
     | 'editTitle' | 'editHint' | 'editFailed'
     | 'deploy' | 'deployDisabled' | 'deployFailed'
+    | 'retryMerge' | 'mergeFailed' | 'readyCount' | 'readyHint'
+    | 'deployAll' | 'deploying' | 'releaseFailed'
     | 'retry' | 'retryFailed' | 'cancelFailed'
     | 'timeline' | 'log' | 'openPr' | 'close'
     | 'loadFailed' | 'createFailed'
@@ -591,6 +593,7 @@ export const en: Dictionary = {
     status_pending: 'Pending',
     status_running: 'Building',
     status_answer_pending: 'Answer pending',
+    status_merged: 'Ready to deploy',
     status_deployment_ready: 'Deployment ready',
     status_deploying: 'Deploying',
     status_deployed: 'Deployed',
@@ -608,6 +611,13 @@ export const en: Dictionary = {
     sendAnswer: 'Send and continue',
     answerFailed: 'Failed to send the answer',
     deploy: 'Deploy',
+    retryMerge: 'Retry merge',
+    mergeFailed: 'Failed to merge the pull request',
+    readyCount: '{count} merged and waiting to deploy.',
+    readyHint: 'They ship together in a single rebuild.',
+    deployAll: 'Deploy all ({count})',
+    deploying: 'Deploying…',
+    releaseFailed: 'Failed to start the release',
     deployDisabled: 'Deploys are switched off in Settings › App › Development.',
     deployFailed: 'Failed to start the deploy',
     retry: 'Retry',
