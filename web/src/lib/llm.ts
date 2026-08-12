@@ -1,6 +1,6 @@
 import { api } from './api'
 
-export type Capability = 'chat' | 'embeddings'
+export type Capability = 'chat' | 'embeddings' | 'coding_agent'
 
 export interface Provider {
   key: string
@@ -9,6 +9,8 @@ export interface Provider {
   supports_base_url: boolean
   chat_models: string[]
   embedding_models: string[]
+  /** Models offered to the headless coding CLIs (Claude Code / Codex). */
+  coding_models?: string[]
 }
 
 /** A saved provider connection. The API key is never returned — only has_key. */
@@ -64,8 +66,10 @@ export const setFunctionBinding = (
   body: { credential_id: number | null; model: string | null },
 ) => api.put<FunctionBinding>(`/llm/functions/${key}`, body)
 
-/** Models a provider offers for a given capability (chat or embeddings). */
+/** Models a provider offers for a given capability. */
 export function modelsFor(provider: Provider | undefined, capability: Capability): string[] {
   if (!provider) return []
-  return capability === 'embeddings' ? provider.embedding_models : provider.chat_models
+  if (capability === 'embeddings') return provider.embedding_models
+  if (capability === 'coding_agent') return provider.coding_models ?? []
+  return provider.chat_models
 }

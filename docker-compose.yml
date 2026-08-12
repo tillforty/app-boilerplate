@@ -77,6 +77,35 @@ services:
       retries: 5
       start_period: 20s
 
+  # ── Development agent runner (opt-in: AGENT_ENABLED=true) ────────────────
+  # Executes Development › Agent jobs: clones the configured GitHub repo, runs
+  # Claude Code or Codex in auto mode, pushes a branch, opens the PR, and — on
+  # Deploy — merges it and rebuilds this stack. Deliberately separate from the
+  # api container, which has no git, no Node, and no Docker access.
+  agent_runner:
+    build: ./agent-runner
+    # Pinned name so the runner can launch a deploy sibling from this same image.
+    image: tillforty-agent-runner:local
+    restart: unless-stopped
+    profiles: ["agent"]
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      AGENT_RUNNER_IMAGE: tillforty-agent-runner:local
+    volumes:
+      - agent_work:/work
+      # Lets the runner drive the HOST daemon to rebuild the stack on Deploy.
+      # This is root-equivalent access to the host — keep AGENT_ENABLED=false
+      # unless you want one-click deploys.
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Mounted at the SAME path inside and out, so the relative bind mounts in
+      # this file still resolve when the rebuild is driven from inside.
+      - ${APP_CHECKOUT_PATH:-/opt/app-boilerplate}:${APP_CHECKOUT_PATH:-/opt/app-boilerplate}
+
   # ── React frontend (nginx serving the built SPA + /api proxy) ────────────
   web:
     build:
@@ -241,6 +270,7 @@ services:
 volumes:
   pgdata:
   storage:
+  agent_work:
   n8n_pgdata:
   n8n_data:
   glitchtip_pgdata:

@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
-from . import ai, customers, db, demo, development, files, llmconfig, oauth, observability, roles, settings, stats, vault, vectors
+from . import ai, customers, db, demo, devagent, development, files, llmconfig, oauth, observability, roles, settings, stats, vault, vectors
 from .auth import ensure_schema_and_seed, router as auth_router
 from .ratelimit import limiter
 
@@ -39,6 +39,9 @@ async def lifespan(app: FastAPI):
     await vault.ensure_schema()
     # llmconfig stores API keys in the vault, so it must run after vault.
     await llmconfig.ensure_schema()
+    # devagent stores the GitHub token in the vault and binds an llmconfig
+    # function, so it must run after both.
+    await devagent.ensure_schema()
     await files.ensure_schema()
     await vectors.ensure_schema()
     # customers must run after vectors: it declares a pgvector embedding column.
@@ -67,6 +70,7 @@ app.include_router(stats.router)
 app.include_router(ai.router)
 app.include_router(customers.router)
 app.include_router(development.router)
+app.include_router(devagent.router)
 app.include_router(llmconfig.router)
 # Register your app-specific routers here.
 

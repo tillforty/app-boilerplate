@@ -28,9 +28,10 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import LlmCredentialsTab from '@/components/settings/LlmCredentialsTab'
 import AiFunctionsTab from '@/components/settings/AiFunctionsTab'
+import DevelopmentTab from '@/components/settings/DevelopmentTab'
 
 const LOGO_MAX_BYTES = 2 * 1024 * 1024
-const SETTINGS_TABS = ['general', 'llm', 'functions'] as const
+const SETTINGS_TABS = ['general', 'llm', 'functions', 'development'] as const
 type SettingsTab = (typeof SETTINGS_TABS)[number]
 
 export default function SettingsPage() {
@@ -39,6 +40,7 @@ export default function SettingsPage() {
   const { refresh } = useAppSettings()
   const canManage = can('roles:manage')
   const canAi = can('ai:manage')
+  const canDev = can('development:manage')
   const [tab, setTab] = useTabParam<SettingsTab>(SETTINGS_TABS, 'general')
 
   const [form, setForm] = useState<AdminSettings | null>(null)
@@ -173,6 +175,7 @@ export default function SettingsPage() {
           <TabsTrigger value="general">{t('settings.tabGeneral')}</TabsTrigger>
           <TabsTrigger value="llm">{t('settings.tabLlm')}</TabsTrigger>
           <TabsTrigger value="functions">{t('settings.tabFunctions')}</TabsTrigger>
+          <TabsTrigger value="development">{t('settings.tabDevelopment')}</TabsTrigger>
         </TabsList>
 
         <TabsContent value="general" className="space-y-6">
@@ -395,6 +398,14 @@ export default function SettingsPage() {
         <TabsContent value="functions">
           {canAi ? (
             <AiFunctionsTab />
+          ) : (
+            <p className="text-sm text-muted-foreground">{t('settings.noPermission')}</p>
+          )}
+        </TabsContent>
+
+        <TabsContent value="development">
+          {canDev ? (
+            <DevelopmentTab />
           ) : (
             <p className="text-sm text-muted-foreground">{t('settings.noPermission')}</p>
           )}
