@@ -653,6 +653,25 @@ APP_CHECKOUT_PATH=/opt/app-boilerplate   # pulled + rebuilt on Deploy
 then `./start.sh`. Configure the repo and token in the UI — they are runtime
 settings, not env vars.
 
+### What the agent can reach
+
+The runner container is started with `env_file: .env`, so its own process holds
+every secret in this stack. The **coding CLI does not**: it is launched with an
+allow-list (`AGENT_ENV_KEEP` in `runner.py`) of roughly `PATH`, `HOME`, TLS trust
+and proxy variables, plus the one API key its provider needs. `VAULT_KEY`,
+`POSTGRES_PASSWORD`, `JWT_SECRET`, the OAuth client secrets and the SMTP and LLM
+credentials are all withheld from LLM-written code.
+
+That also means a job has **no database access by default**. If you want jobs to
+be able to inspect real data, set `AGENT_DATABASE_URL` to a read-only DSN (see
+`.env.example` for the `agent_ro` role) — it arrives in the agent's environment
+as `DATABASE_URL`. There is no `psql` in the image; jobs reach Postgres through
+`asyncpg`, which is on the venv `PATH`.
+
+Two things this does **not** contain: the runner still mounts the Docker socket
+(root-equivalent on the host), and jobs run with network access. Keep
+`AGENT_ENABLED=false` unless you accept both.
+
 ### How it is wired
 
 | Piece | Where | Notes |

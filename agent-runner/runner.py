@@ -57,6 +57,24 @@ AGENT_USER = os.environ.get("AGENT_USER", "agent")
 AGENT_GIT_NAME = os.environ.get("AGENT_GIT_NAME", "Development agent")
 AGENT_GIT_EMAIL = os.environ.get("AGENT_GIT_EMAIL", "agent@localhost")
 
+# The coding CLI is the one thing this process starts that runs LLM-written code,
+# so it gets an allow-list instead of this container's environment. That env is
+# `env_file: .env` in full — VAULT_KEY, POSTGRES_PASSWORD, JWT_SECRET, the OAuth
+# client secrets, SMTP and LLM credentials — none of which a job needs. Anything
+# it legitimately requires is passed explicitly at the call site.
+AGENT_ENV_KEEP = frozenset({
+    "PATH", "HOME", "HOSTNAME", "LANG", "LANGUAGE", "LC_ALL", "TZ", "TERM",
+    # TLS trust and proxies, or the CLI can't reach its own API from some hosts.
+    "SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS", "NODE_OPTIONS",
+    "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY",
+    "http_proxy", "https_proxy", "no_proxy",
+})
+
+# Optional read-only DSN handed to the agent *as* DATABASE_URL, so a job can still
+# inspect real data for analysis without holding the application's read/write
+# credentials. Unset means the agent gets no database access at all.
+AGENT_DATABASE_URL = os.environ.get("AGENT_DATABASE_URL", "")
+
 # Image used for the detached deploy sibling. Defaults to this same image, which
 # already carries git + bash + the docker CLI.
 DEPLOY_IMAGE = os.environ.get("AGENT_RUNNER_IMAGE", "tillforty-agent-runner:local")
@@ -102,9 +120,18 @@ GIT_SAFE_ENV = {
 
 
 def run(cmd: list[str], cwd: str | None = None, env: dict | None = None,
-        timeout: int = 300, user: str | None = None) -> subprocess.CompletedProcess:
-    """Run a command, capturing both streams. Never raises on non-zero exit."""
-    full_env = {**os.environ, **GIT_SAFE_ENV, **(env or {})}
+        timeout: int = 300, user: str | None = None,
+        inherit_env: bool = True) -> subprocess.CompletedProcess:
+    """Run a command, capturing both streams. Never raises on non-zero exit.
+
+    `inherit_env=False` starts from AGENT_ENV_KEEP rather than this container's
+    environment — use it for anything running code we didn't write.
+    """
+    base = (
+        dict(os.environ) if inherit_env
+        else {k: v for k, v in os.environ.items() if k in AGENT_ENV_KEEP}
+    )
+    full_env = {**base, **GIT_SAFE_ENV, **(env or {})}
     kwargs: dict = {}
     if user:
         kwargs["user"] = user
@@ -546,11 +573,16 @@ async def run_job(pool, job) -> None:
             if job["model"]:
                 cmd += ["--model", job["model"]]
             env = {"OPENAI_API_KEY": api_key}
+        if AGENT_DATABASE_URL:
+            env["DATABASE_URL"] = AGENT_DATABASE_URL
         cmd.append(prompt)
 
         await event(pool, job_id, "agent", f"Running {job['agent']} in auto mode…")
         log(f"job {job_id}: {' '.join(cmd[:-1])} <prompt>")
-        proc = run(cmd, cwd=workdir, env=env, timeout=AGENT_TIMEOUT, user=AGENT_USER)
+        # inherit_env=False: the agent sees AGENT_ENV_KEEP plus what's set here,
+        # never this container's secrets.
+        proc = run(cmd, cwd=workdir, env=env, timeout=AGENT_TIMEOUT, user=AGENT_USER,
+                   inherit_env=False)
         record(" ".join(cmd[:-1]) + " <prompt>", proc)
 
         if not await still_active(pool, job_id):
