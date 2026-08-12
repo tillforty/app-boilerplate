@@ -35,7 +35,6 @@ export default function DevelopmentTab() {
   const [config, setConfig] = useState<DevConfig | null>(null)
   const [repo, setRepo] = useState('')
   const [baseBranch, setBaseBranch] = useState('main')
-  const [checkoutPath, setCheckoutPath] = useState('')
   const [deployEnabled, setDeployEnabled] = useState(false)
   const [token, setToken] = useState('')
   const [loading, setLoading] = useState(true)
@@ -48,7 +47,6 @@ export default function DevelopmentTab() {
     setConfig(c)
     setRepo(c.repo_full_name ?? '')
     setBaseBranch(c.base_branch)
-    setCheckoutPath(c.checkout_path)
     setDeployEnabled(c.deploy_enabled)
     setToken('')
   }
@@ -79,7 +77,6 @@ export default function DevelopmentTab() {
       const updated = await updateDevConfig({
         repo_full_name: repo.trim() || null,
         base_branch: baseBranch.trim() || 'main',
-        checkout_path: checkoutPath.trim(),
         deploy_enabled: deployEnabled,
         // Blank means "leave the stored token alone".
         ...(token.trim() ? { github_token: token.trim() } : {}),
@@ -210,13 +207,11 @@ export default function DevelopmentTab() {
                 </span>
               </span>
             </label>
-            <div className="space-y-2">
-              <Label htmlFor="dev-checkout">{t('devSettings.checkoutPath')}</Label>
-              <Input
-                id="dev-checkout"
-                value={checkoutPath}
-                onChange={(e) => setCheckoutPath(e.target.value)}
-              />
+            {/* Read-only: docker-compose bind-mounts this exact path into the
+                runner, so it can only be changed in .env + a redeploy. */}
+            <div className="space-y-1">
+              <Label>{t('devSettings.checkoutPath')}</Label>
+              <p className="font-mono text-sm">{config?.checkout_path}</p>
               <p className="text-xs text-muted-foreground">{t('devSettings.checkoutPathHint')}</p>
             </div>
             <div className="flex flex-wrap items-center gap-2 text-sm">

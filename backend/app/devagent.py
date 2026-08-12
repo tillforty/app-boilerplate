@@ -19,7 +19,7 @@ Job lifecycle:
 
 Secrets: the GitHub token is written to the pgcrypto vault under
 `dev_agent:github_token` and never returned to the browser (only `has_token`).
-Canonical DDL: migrations/0012_dev_agent.sql, migrations/0013_dev_job_files.sql.
+Canonical DDL: migrations/0012_dev_agent.sql, migrations/0014_dev_job_files.sql.
 """
 import asyncio
 import json
@@ -48,6 +48,11 @@ from .roles import require_permission
 router = APIRouter(prefix="/development", tags=["development"])
 
 GITHUB_API = "https://api.github.com"
+
+# Where the Deploy button pulls and rebuilds. Env-only on purpose: docker-compose
+# bind-mounts this exact path into the runner, so a value edited in the UI could
+# name a directory the container cannot even see. Change it in .env, then redeploy.
+CHECKOUT_PATH = os.environ.get("APP_CHECKOUT_PATH", "/opt/app-boilerplate")
 TOKEN_SECRET_NAME = "dev_agent:github_token"
 
 # The runner heartbeats on every poll; allow a few missed beats before we call
@@ -97,7 +102,7 @@ def _safe_name(name: str | None, index: int) -> str:
 
 
 async def ensure_schema() -> None:
-    """Idempotent mirror of migrations/0012_dev_agent.sql + 0013_dev_job_files.sql."""
+    """Idempotent mirror of migrations/0012_dev_agent.sql + 0014_dev_job_files.sql."""
     async with db.get_pool().acquire() as conn:
         await conn.execute(
             """
@@ -124,7 +129,7 @@ async def ensure_schema() -> None:
                 agent        text NOT NULL CHECK (agent IN ('claude_code', 'codex')),
                 model        text,
                 status       text NOT NULL DEFAULT 'pending'
-                             CHECK (status IN ('pending', 'running', 'answer_pending',
+                             CHECK (status IN ('pending', 'running', 'answer_pending', 'merged',
                                                'deployment_ready', 'deploying', 'deployed',
                                                'failed', 'cancelled')),
                 branch       text,
@@ -181,6 +186,24 @@ async def ensure_schema() -> None:
                 finished_at   timestamptz
             );
             CREATE INDEX IF NOT EXISTS dev_deployments_created_idx ON dev_deployments (created_at DESC);
+
+            ALTER TABLE dev_jobs ADD COLUMN IF NOT EXISTS release_id bigint
+                REFERENCES dev_deployments(id) ON DELETE SET NULL;
+            ALTER TABLE dev_jobs ADD COLUMN IF NOT EXISTS merged_at timestamptz;
+            ALTER TABLE dev_jobs ADD COLUMN IF NOT EXISTS merge_requested boolean NOT NULL DEFAULT false;
+            CREATE INDEX IF NOT EXISTS dev_jobs_release_idx ON dev_jobs (release_id);
+            ALTER TABLE dev_deployments ADD COLUMN IF NOT EXISTS release_number integer;
+            ALTER TABLE dev_deployments ADD COLUMN IF NOT EXISTS job_count integer NOT NULL DEFAULT 0;
+            """
+        )
+        # Widen the status CHECK for installs created before releases existed.
+        await conn.execute("ALTER TABLE dev_jobs DROP CONSTRAINT IF EXISTS dev_jobs_status_check")
+        await conn.execute(
+            """
+            ALTER TABLE dev_jobs ADD CONSTRAINT dev_jobs_status_check CHECK (
+                status IN ('pending', 'running', 'answer_pending', 'merged',
+                           'deployment_ready', 'deploying', 'deployed', 'failed', 'cancelled')
+            )
             """
         )
 
@@ -258,7 +281,6 @@ class DevConfig(BaseModel):
 class DevConfigUpdate(BaseModel):
     repo_full_name: str | None = Field(default=None, max_length=200)
     base_branch: str | None = Field(default=None, min_length=1, max_length=200)
-    checkout_path: str | None = Field(default=None, min_length=1, max_length=500)
     deploy_enabled: bool | None = None
     # Write-only: non-empty stores/rotates the vault token, blank/None keeps it.
     github_token: str | None = None
@@ -297,7 +319,7 @@ async def _to_config(row) -> DevConfig:
     return DevConfig(
         repo_full_name=row["repo_full_name"],
         base_branch=row["base_branch"],
-        checkout_path=row["checkout_path"],
+        checkout_path=CHECKOUT_PATH,
         deploy_enabled=row["deploy_enabled"],
         has_token=row["has_token"],
         validation=ValidationResult(**validation) if validation else None,
@@ -331,7 +353,6 @@ async def update_config(
             "Repository must be in 'owner/name' form, e.g. tillforty/app-boilerplate.",
         )
     base_branch = existing["base_branch"] if body.base_branch is None else body.base_branch.strip()
-    checkout_path = existing["checkout_path"] if body.checkout_path is None else body.checkout_path.strip()
     deploy_enabled = existing["deploy_enabled"] if body.deploy_enabled is None else body.deploy_enabled
 
     new_token = (body.github_token or "").strip()
@@ -340,7 +361,6 @@ async def update_config(
     revalidate = (
         repo != existing["repo_full_name"]
         or base_branch != existing["base_branch"]
-        or checkout_path != existing["checkout_path"]
         or bool(new_token)
         or body.clear_token
     )
@@ -350,17 +370,16 @@ async def update_config(
             row = await conn.fetchrow(
                 """
                 UPDATE dev_settings
-                SET repo_full_name = $1, base_branch = $2, checkout_path = $3,
-                    deploy_enabled = $4, has_token = $5,
-                    validation = CASE WHEN $6 THEN NULL ELSE validation END,
-                    validated_at = CASE WHEN $6 THEN NULL ELSE validated_at END,
+                SET repo_full_name = $1, base_branch = $2,
+                    deploy_enabled = $3, has_token = $4,
+                    validation = CASE WHEN $5 THEN NULL ELSE validation END,
+                    validated_at = CASE WHEN $5 THEN NULL ELSE validated_at END,
                     updated_at = now()
                 WHERE id = 1
                 RETURNING *
                 """,
                 repo,
                 base_branch,
-                checkout_path,
                 deploy_enabled,
                 has_token,
                 revalidate,
@@ -494,7 +513,7 @@ async def _run_validation(row) -> ValidationResult:
         remote = info.get("checkout_remote") or "unknown"
         docker_ok = bool(info.get("has_docker"))
         if not checkout_ok:
-            add("deploy", False, f"Checkout {row['checkout_path']} is not a git repository on the host.")
+            add("deploy", False, f"Checkout {CHECKOUT_PATH} is not a git repository on the host.")
         elif not docker_ok:
             add("deploy", False, "The runner has no access to the Docker socket, so it can't rebuild.")
         elif repo.lower() not in remote.lower():
@@ -504,7 +523,7 @@ async def _run_validation(row) -> ValidationResult:
                 f"Checkout remote ({remote}) doesn't match the configured repo — deploying would ship a different app.",
             )
         else:
-            add("deploy", True, f"{row['checkout_path']} tracks {remote} and Docker is reachable.")
+            add("deploy", True, f"{CHECKOUT_PATH} tracks {remote} and Docker is reachable.")
 
     return ValidationResult(ok=all(c.ok for c in checks), checks=checks)
 
@@ -560,6 +579,8 @@ class Job(BaseModel):
     error: str | None
     attempts: int
     files: list[JobFile] = []
+    merged_at: datetime | None = None
+    release_id: int | None = None
     created_by_name: str | None = None
     created_at: datetime
     started_at: datetime | None
@@ -569,6 +590,10 @@ class Job(BaseModel):
 class JobDetail(Job):
     log: str | None
     events: list[JobEvent]
+
+
+class JobUpdate(BaseModel):
+    prompt: str = Field(min_length=5)
 
 
 def _to_job(row, files: list[JobFile]) -> Job:
@@ -587,6 +612,8 @@ def _to_job(row, files: list[JobFile]) -> Job:
         error=row["error"],
         attempts=row["attempts"],
         files=files,
+        merged_at=row["merged_at"],
+        release_id=row["release_id"],
         created_by_name=row["created_by_name"],
         created_at=row["created_at"],
         started_at=row["started_at"],
@@ -656,8 +683,12 @@ async def generate_title(prompt: str) -> str:
     return title[:120] or fallback
 
 
-_JOB_SELECT = """
-    SELECT j.*, NULLIF(TRIM(COALESCE(u.name, '') || ' ' || COALESCE(u.surname, '')), '') AS created_by_name
+# Who started the job. The email is the fallback so the row still names someone
+# when a profile has no name filled in; NULL only means the user was deleted.
+_USER_LABEL = "COALESCE(NULLIF(TRIM(COALESCE({u}.name, '') || ' ' || COALESCE({u}.surname, '')), ''), {u}.email)"
+
+_JOB_SELECT = f"""
+    SELECT j.*, {_USER_LABEL.format(u='u')} AS created_by_name
     FROM dev_jobs j
     LEFT JOIN users u ON u.id = j.created_by
 """
@@ -821,6 +852,56 @@ async def download_job_file(
     )
 
 
+
+@router.patch("/jobs/{job_id}", response_model=Job)
+async def update_job(
+    job_id: int,
+    body: JobUpdate,
+    _: UserOut = Depends(require_permission("development:run")),
+) -> Job:
+    """Reword a job that hasn't started yet. Pending only — once the agent has a
+    working tree, changing the brief underneath it would be meaningless."""
+    prompt = body.prompt.strip()
+    current = await db.get_pool().fetchrow("SELECT * FROM dev_jobs WHERE id = $1", job_id)
+    if current is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Job not found")
+    if current["status"] != "pending":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "Only a pending job can be edited."
+        )
+    if prompt == current["prompt"]:
+        return await _job_out(await db.get_pool().fetchrow(f"{_JOB_SELECT} WHERE j.id = $1", job_id))
+
+    # Rename to match the new brief. Done before the transaction so a slow model
+    # doesn't hold the row lock the runner needs to claim work.
+    title = await generate_title(prompt)
+
+    async with db.get_pool().acquire() as conn:
+        async with conn.transaction():
+            # Re-check under the lock: the runner may have claimed it meanwhile.
+            row = await conn.fetchrow(
+                "SELECT status FROM dev_jobs WHERE id = $1 FOR UPDATE", job_id
+            )
+            if row is None:
+                raise HTTPException(status.HTTP_404_NOT_FOUND, "Job not found")
+            if row["status"] != "pending":
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    "The agent just started this job, so it can no longer be edited.",
+                )
+            await conn.execute(
+                "UPDATE dev_jobs SET prompt = $2, title = $3, updated_at = now() WHERE id = $1",
+                job_id,
+                prompt,
+                title,
+            )
+            await conn.execute(
+                "INSERT INTO dev_job_events (job_id, kind, message) VALUES ($1, 'edited', 'Prompt edited before the run started.')",
+                job_id,
+            )
+    return await _job_out(await db.get_pool().fetchrow(f"{_JOB_SELECT} WHERE j.id = $1", job_id))
+
+
 @router.post("/jobs/{job_id}/answer", response_model=Job)
 async def answer_job(
     job_id: int,
@@ -943,40 +1024,44 @@ async def cancel_job(
 
 
 # ── Deployments ──────────────────────────────────────────────────────────────
-class Deployment(BaseModel):
+class ReleaseJob(BaseModel):
+    """One function included in a release, for the history table's PR labels."""
+
     id: int
-    job_id: int | None
-    job_title: str | None = None
+    title: str
     pr_number: int | None
     pr_url: str | None
-    merge_sha: str | None
+
+
+class Release(BaseModel):
+    id: int
+    release_number: int | None
     version_label: str | None
     status: str
+    job_count: int
+    jobs: list[ReleaseJob] = []
     error: str | None
     deployed_by_name: str | None = None
     created_at: datetime
     finished_at: datetime | None
 
 
-_DEPLOYMENT_SELECT = """
-    SELECT d.*, j.title AS job_title,
-           NULLIF(TRIM(COALESCE(u.name, '') || ' ' || COALESCE(u.surname, '')), '') AS deployed_by_name
+_RELEASE_SELECT = f"""
+    SELECT d.*,
+           {_USER_LABEL.format(u='u')} AS deployed_by_name
     FROM dev_deployments d
-    LEFT JOIN dev_jobs j ON j.id = d.job_id
     LEFT JOIN users u ON u.id = d.deployed_by
 """
 
 
-def _to_deployment(row) -> Deployment:
-    return Deployment(
+def _to_release(row, jobs: list[ReleaseJob] | None = None) -> Release:
+    return Release(
         id=row["id"],
-        job_id=row["job_id"],
-        job_title=row["job_title"],
-        pr_number=row["pr_number"],
-        pr_url=row["pr_url"],
-        merge_sha=row["merge_sha"],
+        release_number=row["release_number"],
         version_label=row["version_label"],
         status=row["status"],
+        job_count=row["job_count"],
+        jobs=jobs or [],
         error=row["error"],
         deployed_by_name=row["deployed_by_name"],
         created_at=row["created_at"],
@@ -984,27 +1069,65 @@ def _to_deployment(row) -> Deployment:
     )
 
 
-@router.get("/deployments", response_model=list[Deployment])
-async def list_deployments(
+@router.get("/releases", response_model=list[Release])
+async def list_releases(
     limit: int = Query(default=50, ge=1, le=200),
     _: UserOut = Depends(require_permission("development:read")),
-) -> list[Deployment]:
-    """History of every version that was shipped, newest first."""
+) -> list[Release]:
+    """History of every release that was shipped, newest first, each listing the
+    functions it carried so the PR numbers stay traceable."""
     rows = await db.get_pool().fetch(
-        f"{_DEPLOYMENT_SELECT} ORDER BY d.created_at DESC LIMIT $1", limit
+        f"{_RELEASE_SELECT} ORDER BY d.created_at DESC LIMIT $1", limit
     )
-    return [_to_deployment(r) for r in rows]
+    if not rows:
+        return []
+    job_rows = await db.get_pool().fetch(
+        """
+        SELECT id, title, pr_number, pr_url, release_id FROM dev_jobs
+        WHERE release_id = ANY($1::bigint[]) ORDER BY id
+        """,
+        [r["id"] for r in rows],
+    )
+    by_release: dict[int, list[ReleaseJob]] = {}
+    for j in job_rows:
+        by_release.setdefault(j["release_id"], []).append(
+            ReleaseJob(id=j["id"], title=j["title"], pr_number=j["pr_number"], pr_url=j["pr_url"])
+        )
+    return [_to_release(r, by_release.get(r["id"], [])) for r in rows]
 
 
-@router.post("/jobs/{job_id}/deploy", response_model=Deployment, status_code=status.HTTP_202_ACCEPTED)
-async def deploy_job(
+@router.post("/jobs/{job_id}/merge", response_model=Job)
+async def request_merge(
     job_id: int,
-    user: UserOut = Depends(require_permission("development:deploy")),
-) -> Deployment:
-    """Merge the job's PR and rebuild this server.
+    _: UserOut = Depends(require_permission("development:run")),
+) -> Job:
+    """Retry an auto-merge that failed. Merging normally happens by itself the
+    moment the agent finishes, so this is only for the exception."""
+    row = await db.get_pool().fetchrow(
+        "SELECT status, pr_number FROM dev_jobs WHERE id = $1", job_id
+    )
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Job not found")
+    if row["status"] != "deployment_ready" or row["pr_number"] is None:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "This job has no open pull request awaiting a merge."
+        )
+    await db.get_pool().execute(
+        "UPDATE dev_jobs SET merge_requested = true, error = NULL, updated_at = now() WHERE id = $1",
+        job_id,
+    )
+    return await _job_out(await db.get_pool().fetchrow(f"{_JOB_SELECT} WHERE j.id = $1", job_id))
 
-    Returns immediately with a `pending` deployment; the runner does the merge
-    and the rebuild, then flips the row (and the job) to `deployed` or `failed`.
+
+@router.post("/releases", response_model=Release, status_code=status.HTTP_202_ACCEPTED)
+async def create_release(
+    user: UserOut = Depends(require_permission("development:deploy")),
+) -> Release:
+    """Ship everything that is merged but not yet deployed, in one rebuild.
+
+    The release is whatever is on the base branch right now: each merged job is
+    stamped with this release id up front, so a job merged *after* the button is
+    pressed waits for the next one rather than being silently claimed by this.
     """
     config = await _config_row()
     if not config["deploy_enabled"]:
@@ -1020,37 +1143,44 @@ async def deploy_job(
 
     async with db.get_pool().acquire() as conn:
         async with conn.transaction():
-            job = await conn.fetchrow("SELECT * FROM dev_jobs WHERE id = $1 FOR UPDATE", job_id)
-            if job is None:
-                raise HTTPException(status.HTTP_404_NOT_FOUND, "Job not found")
-            if job["status"] != "deployment_ready":
+            pending = await conn.fetch(
+                "SELECT id FROM dev_jobs WHERE status = 'merged' FOR UPDATE"
+            )
+            if not pending:
                 raise HTTPException(
-                    status.HTTP_409_CONFLICT, "This job has no pull request ready to deploy."
+                    status.HTTP_409_CONFLICT, "Nothing is merged and waiting to be deployed."
                 )
-            if job["pr_number"] is None:
-                raise HTTPException(status.HTTP_409_CONFLICT, "This job has no pull request.")
-
-            dep = await conn.fetchrow(
+            next_number = await conn.fetchval(
+                "SELECT COALESCE(MAX(release_number), 0) + 1 FROM dev_deployments"
+            )
+            rel = await conn.fetchrow(
                 """
                 INSERT INTO dev_deployments
-                    (job_id, pr_number, pr_url, version_label, status, deployed_by)
-                VALUES ($1, $2, $3, $4, 'pending', $5)
+                    (release_number, version_label, status, job_count, deployed_by)
+                VALUES ($1, $2, 'pending', $3, $4)
                 RETURNING *
                 """,
-                job_id,
-                job["pr_number"],
-                job["pr_url"],
-                f"PR #{job['pr_number']}",
+                next_number,
+                f"Release #{next_number}",
+                len(pending),
                 user.id,
             )
             await conn.execute(
-                "UPDATE dev_jobs SET status = 'deploying', updated_at = now() WHERE id = $1",
-                job_id,
+                """
+                UPDATE dev_jobs SET status = 'deploying', release_id = $1, updated_at = now()
+                WHERE status = 'merged'
+                """,
+                rel["id"],
             )
-            await conn.execute(
-                "INSERT INTO dev_job_events (job_id, kind, message) VALUES ($1, 'deploy', $2)",
-                job_id,
-                f"Deploy requested by {user.name or user.email}.",
-            )
-    full = await db.get_pool().fetchrow(f"{_DEPLOYMENT_SELECT} WHERE d.id = $1", dep["id"])
-    return _to_deployment(full)
+            for j in pending:
+                await conn.execute(
+                    "INSERT INTO dev_job_events (job_id, kind, message) VALUES ($1, 'deploy', $2)",
+                    j["id"],
+                    f"Included in release #{next_number}, requested by {user.name or user.email}.",
+                )
+    full = await db.get_pool().fetchrow(f"{_RELEASE_SELECT} WHERE d.id = $1", rel["id"])
+    jobs = await db.get_pool().fetch(
+        "SELECT id, title, pr_number, pr_url FROM dev_jobs WHERE release_id = $1 ORDER BY id",
+        rel["id"],
+    )
+    return _to_release(full, [ReleaseJob(**dict(j)) for j in jobs])

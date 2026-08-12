@@ -648,7 +648,7 @@ settings, not env vars.
 | API | `backend/app/devagent.py` | Config, validation, jobs, deployments. Never shells out. |
 | Worker | `agent-runner/runner.py` | Clones, runs the CLI, pushes, opens/merges PRs, deploys. |
 | Schema | `migrations/0012_dev_agent.sql` | `dev_settings`, `dev_jobs`, `dev_job_events`, `dev_deployments`. |
-| Attachments | `migrations/0013_dev_job_files.sql` | `dev_job_files` — the bytes of screenshots/files sent with a prompt. |
+| Attachments | `migrations/0014_dev_job_files.sql` | `dev_job_files` — the bytes of screenshots/files sent with a prompt. |
 | UI | `web/src/components/development/AgentTab.tsx` | Jobs + deployment history. |
 | Settings UI | `web/src/components/settings/DevelopmentTab.tsx` | Repo, token, deploy switch, checks. |
 

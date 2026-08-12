@@ -49,11 +49,18 @@ export type JobStatus =
   | 'pending'
   | 'running'
   | 'answer_pending'
+  /** Merged into the base branch, waiting for the next release. */
+  | 'merged'
+  /** PR is open but the automatic merge did not succeed — needs a human. */
   | 'deployment_ready'
   | 'deploying'
   | 'deployed'
   | 'failed'
   | 'cancelled'
+
+/** Statuses where the pipeline is still working — the list keeps polling and the
+ *  status label spins. Kept here so every view agrees on what "in progress" is. */
+export const JOB_IN_PROGRESS: JobStatus[] = ['pending', 'running', 'deploying']
 
 /** Which coding CLI is bound, per Settings › App › AI functions. */
 export interface AgentInfo {
@@ -137,6 +144,8 @@ export interface Job {
   error: string | null
   attempts: number
   files: JobFile[]
+  merged_at: string | null
+  release_id: number | null
   created_by_name: string | null
   created_at: string
   started_at: string | null
@@ -148,15 +157,27 @@ export interface JobDetail extends Job {
   events: JobEvent[]
 }
 
-export interface Deployment {
+export type DeploymentStatus = 'pending' | 'merging' | 'deploying' | 'deployed' | 'failed'
+
+/** Deployment counterpart of {@link JOB_IN_PROGRESS}. */
+export const DEPLOYMENT_IN_PROGRESS: DeploymentStatus[] = ['pending', 'merging', 'deploying']
+
+/** One function carried by a release. */
+export interface ReleaseJob {
   id: number
-  job_id: number | null
-  job_title: string | null
+  title: string
   pr_number: number | null
   pr_url: string | null
-  merge_sha: string | null
+}
+
+/** A release ships every merged function in a single rebuild. */
+export interface Release {
+  id: number
+  release_number: number | null
   version_label: string | null
-  status: 'pending' | 'merging' | 'deploying' | 'deployed' | 'failed'
+  status: DeploymentStatus
+  job_count: number
+  jobs: ReleaseJob[]
   error: string | null
   deployed_by_name: string | null
   created_at: string
@@ -191,6 +212,9 @@ export async function downloadJobFile(jobId: number, file: JobFile): Promise<voi
   a.click()
   URL.revokeObjectURL(url)
 }
+/** Reword a job that hasn't started. Pending only; the title is regenerated. */
+export const updateJobPrompt = (id: number, prompt: string) =>
+  api.patch<Job>(`/development/jobs/${id}`, { prompt })
 /** Answers can carry attachments too — the agent often asks about a screen. */
 export const answerJob = (id: number, answer: string, files: File[] = []) => {
   const form = new FormData()
@@ -200,8 +224,12 @@ export const answerJob = (id: number, answer: string, files: File[] = []) => {
 }
 export const retryJob = (id: number) => api.post<Job>(`/development/jobs/${id}/retry`, {})
 export const cancelJob = (id: number) => api.post<Job>(`/development/jobs/${id}/cancel`, {})
-export const deployJob = (id: number) =>
-  api.post<Deployment>(`/development/jobs/${id}/deploy`, {})
+/** Retry an auto-merge that failed; merging is otherwise automatic. */
+export const requestMerge = (id: number) =>
+  api.post<Job>(`/development/jobs/${id}/merge`, {})
 
-export const listDeployments = (limit = 50) =>
-  api.get<Deployment[]>(`/development/deployments?limit=${limit}`)
+/** Ship everything merged-but-not-deployed in one rebuild. */
+export const createRelease = () => api.post<Release>('/development/releases', {})
+
+export const listReleases = (limit = 50) =>
+  api.get<Release[]>(`/development/releases?limit=${limit}`)

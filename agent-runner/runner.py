@@ -30,6 +30,7 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 import traceback
 from datetime import datetime, timezone
 
@@ -47,6 +48,8 @@ POLL_INTERVAL = float(os.environ.get("AGENT_POLL_INTERVAL", "5"))
 AGENT_TIMEOUT = int(os.environ.get("AGENT_TIMEOUT", "1800"))
 DEPLOY_TIMEOUT = int(os.environ.get("AGENT_DEPLOY_TIMEOUT", "1800"))
 WORKSPACE = os.environ.get("AGENT_WORKSPACE", "/work")
+# Env-only, and bind-mounted at this same path by docker-compose.yml.
+CHECKOUT_PATH = os.environ.get("APP_CHECKOUT_PATH", "/opt/app-boilerplate")
 AGENT_USER = os.environ.get("AGENT_USER", "agent")
 
 # Image used for the detached deploy sibling. Defaults to this same image, which
@@ -114,6 +117,13 @@ def run(cmd: list[str], cwd: str | None = None, env: dict | None = None,
         return subprocess.CompletedProcess(
             cmd, 124, out, err + f"\n[timed out after {timeout}s]"
         )
+    except OSError as exc:
+        # A missing binary — or, easier to hit, a `cwd` that doesn't exist because
+        # the configured checkout path is wrong. Report it as an ordinary failed
+        # command: callers already handle non-zero, whereas an exception here used
+        # to escape all the way out and kill the heartbeat, making a mistyped path
+        # look like "the runner is offline" instead of "checkout not found".
+        return subprocess.CompletedProcess(cmd, 127, "", str(exc))
 
 
 def git(args: list[str], cwd: str, token: str | None = None, **kw) -> subprocess.CompletedProcess:
@@ -215,8 +225,7 @@ def probe_host(checkout_path: str) -> dict:
 async def heartbeat(pool, cache: dict) -> None:
     """Refresh dev_settings.runner_seen_at every poll; re-probe the host rarely
     (a `docker version` per 5s would be pure noise)."""
-    config = await load_config(pool)
-    checkout = config["checkout_path"] if config else "/opt/app-boilerplate"
+    checkout = CHECKOUT_PATH
     now = datetime.now(timezone.utc).timestamp()
     if now - cache.get("at", 0) > 60 or cache.get("path") != checkout:
         cache["info"] = probe_host(checkout)
@@ -293,6 +302,74 @@ def human_size(size: int) -> str:
     if size < 1024 * 1024:
         return f"{size // 1024} KB"
     return f"{size / (1024 * 1024):.1f} MB"
+
+
+async def _heartbeat_forever() -> None:
+    """Own pool, own event loop — see start_heartbeat_thread."""
+    pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=2)
+    cache: dict = {}
+    while True:
+        try:
+            await heartbeat(pool, cache)
+        except Exception:  # noqa: BLE001 — liveness must outlive any single failure
+            log("heartbeat error:\n" + traceback.format_exc())
+        await asyncio.sleep(POLL_INTERVAL)
+
+
+async def _deploy_forever() -> None:
+    """Own pool, own event loop — see start_deploy_thread."""
+    pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=2)
+    while True:
+        try:
+            await reconcile_deployments(pool)
+            job = await claim_merge_retry(pool)
+            if job is not None:
+                await retry_merge(pool, job)
+                continue
+
+            rel = await claim_release(pool)
+            if rel is not None:
+                await run_release(pool, rel)
+                continue
+        except Exception:  # noqa: BLE001 — deploys must outlive any single failure
+            log("deploy worker error:\n" + traceback.format_exc())
+        await asyncio.sleep(POLL_INTERVAL)
+
+
+def start_deploy_thread() -> None:
+    """Deploy on its own thread so a build in progress can't stall a release.
+
+    Clicking Deploy used to do nothing visible whenever a job was running: the
+    work loop was blocked inside a coding CLI, so the queued deployment sat
+    unclaimed until the build finished — potentially the full AGENT_TIMEOUT.
+    Merging a PR and launching the rebuild sibling is independent of whatever the
+    agent is writing, so it gets its own worker. Claims use FOR UPDATE SKIP
+    LOCKED, so the two threads can never take the same row.
+    """
+    def worker() -> None:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(_deploy_forever())
+
+    threading.Thread(target=worker, name="deploy", daemon=True).start()
+
+
+def start_heartbeat_thread() -> None:
+    """Beat from a dedicated thread, independent of whatever the worker is doing.
+
+    The work loop drives the coding CLIs through *blocking* subprocess calls that
+    can hold the process for the whole AGENT_TIMEOUT. A heartbeat inside that
+    loop therefore stops for the entire build, and the app declares the runner
+    offline exactly while it is busiest — which also made the API refuse to queue
+    a deploy mid-job. Liveness gets its own thread so it can never be starved by
+    the work it is reporting on.
+    """
+    def worker() -> None:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(_heartbeat_forever())
+
+    threading.Thread(target=worker, name="heartbeat", daemon=True).start()
 
 
 # ── Prompt construction ──────────────────────────────────────────────────────
@@ -579,6 +656,32 @@ async def run_job(pool, job) -> None:
         await event(pool, job_id, "pr", f"Opened PR #{pr_json['number']}.")
         log(f"job {job_id} → PR #{pr_json['number']}")
 
+        # Merge straight away. The job is "built" once it is on the base branch;
+        # shipping it is a separate, batched decision the operator makes later.
+        merged_job = await pool.fetchrow("SELECT * FROM dev_jobs WHERE id = $1", job_id)
+        ok, merge_sha, detail = await merge_pr(pool, merged_job, repo, token, base_branch)
+        if ok:
+            await pool.execute(
+                """
+                UPDATE dev_jobs SET status = 'merged', commit_sha = COALESCE($2, commit_sha),
+                                    merged_at = now(), error = NULL, updated_at = now()
+                WHERE id = $1
+                """,
+                job_id, merge_sha,
+            )
+            await event(pool, job_id, "merged",
+                        f"Merged PR #{pr_json['number']} — waiting for the next release.")
+            log(f"job {job_id} merged (PR #{pr_json['number']})")
+        else:
+            # The PR stands; it just needs a human. 'deployment_ready' now means
+            # exactly that: open, not merged.
+            await pool.execute(
+                "UPDATE dev_jobs SET error = $2, updated_at = now() WHERE id = $1",
+                job_id, detail[:2000],
+            )
+            await event(pool, job_id, "failed", detail)
+            log(f"job {job_id}: auto-merge failed — {detail}")
+
     except Exception:  # noqa: BLE001 — a crash here must not kill the worker
         await fail_job(pool, job_id, "The runner crashed while processing this job.",
                        "\n".join(transcript) + "\n" + traceback.format_exc())
@@ -591,6 +694,12 @@ DEPLOY_SCRIPT = """\
 set -eux
 git config --global --add safe.directory "$CHECKOUT"
 cd "$CHECKOUT"
+# This container is root, but the checkout belongs to the server's own user.
+# Anything git writes here (objects, FETCH_HEAD, index) would otherwise end up
+# root-owned and lock that user out of their own repo on the next command, so
+# remember the owner now and hand everything back on the way out.
+CHECKOUT_OWNER="$(stat -c '%u:%g' "$CHECKOUT")"
+trap 'chown -R "$CHECKOUT_OWNER" "$CHECKOUT" || true' EXIT
 git -c credential.helper='!f(){ echo username=x-access-token; echo "password=$GH_TOKEN"; };f' \
     fetch origin "$BASE_BRANCH"
 git checkout "$BASE_BRANCH"
@@ -600,10 +709,242 @@ git -c credential.helper='!f(){ echo username=x-access-token; echo "password=$GH
 """
 
 
-async def claim_deployment(pool):
+CONFLICT_PROMPT = """\
+You are resolving a git merge conflict, nothing else.
+
+The branch `{branch}` was written to satisfy this request:
+
+--- ORIGINAL REQUEST ---
+{prompt}
+--- END REQUEST ---
+
+Meanwhile `{base}` moved on, and merging it in produced conflicts in:
+{files}
+
+Resolve every conflict so that BOTH intents survive: keep the change that landed
+on `{base}`, and keep this branch's work on top of it. Do not drop either side
+just to make the file parse, and do not "resolve" by reverting to one side unless
+the two genuinely describe the same change.
+
+Rules:
+- Remove every conflict marker (<<<<<<<, =======, >>>>>>>).
+- Change nothing beyond what the conflicts require.
+- Do NOT run git commands. The harness commits and pushes for you.
+"""
+
+
+async def resolve_conflicts(pool, job, repo: str, token: str, base_branch: str) -> tuple[bool, str]:
+    """Merge the base branch into the PR branch, letting the coding agent settle
+    any conflicts, then push. Returns (resolved, detail).
+
+    Why this belongs to deploy: two jobs branched from the same commit are always
+    mergeable individually, and the first merge is what makes the second one
+    conflict. That only surfaces at deploy time, so the fix has to live here.
+    """
+    job_id = job["id"]
+    if not job["branch"]:
+        return False, "The job has no branch, so the conflict can't be resolved."
+
+    provider = "anthropic" if job["agent"] == "claude_code" else "openai"
+    api_key = await resolve_agent_key(pool, provider)
+    if not api_key:
+        return False, "No agent API key available to resolve the conflict."
+
+    branch = job["branch"]
+    workdir = os.path.join(WORKSPACE, f"conflict-{job_id}")
+    shutil.rmtree(workdir, ignore_errors=True)
+    os.makedirs(workdir, exist_ok=True)
+    shutil.chown(workdir, user=AGENT_USER, group=AGENT_USER)
+    try:
+        clone = git(["clone", "--branch", branch, f"https://github.com/{repo}.git", "."],
+                    cwd=workdir, token=token, timeout=600)
+        if clone.returncode != 0:
+            return False, "Could not clone the branch to resolve the conflict."
+        run(["chown", "-R", f"{AGENT_USER}:{AGENT_USER}", workdir], timeout=120)
+        git(["config", "user.email", "agent@tillforty.local"], cwd=workdir, timeout=30, user=AGENT_USER)
+        git(["config", "user.name", "Tillforty development agent"], cwd=workdir, timeout=30, user=AGENT_USER)
+
+        fetch = git(["fetch", "origin", base_branch], cwd=workdir, token=token, timeout=300)
+        if fetch.returncode != 0:
+            return False, f"Could not fetch {base_branch}."
+
+        merge = git(["merge", f"origin/{base_branch}", "--no-edit"], cwd=workdir,
+                    timeout=300, user=AGENT_USER)
+        if merge.returncode == 0:
+            # Base merged cleanly — the branch was merely stale, not conflicted.
+            push = git(["push", "origin", branch], cwd=workdir, token=token, timeout=600)
+            if push.returncode != 0:
+                return False, "Could not push the updated branch."
+            return True, f"Brought {branch} up to date with {base_branch}."
+
+        conflicted = [
+            ln.strip() for ln in
+            git(["diff", "--name-only", "--diff-filter=U"], cwd=workdir, timeout=60,
+                user=AGENT_USER).stdout.splitlines() if ln.strip()
+        ]
+        if not conflicted:
+            return False, "Merge failed but reported no conflicted files."
+
+        await event(pool, job_id, "conflict",
+                    f"Merge conflict in {len(conflicted)} file(s); asking the agent to resolve.")
+
+        prompt = CONFLICT_PROMPT.format(
+            branch=branch, base=base_branch, prompt=job["prompt"],
+            files="\n".join(f"- {f}" for f in conflicted),
+        )
+        if job["agent"] == "claude_code":
+            cmd = ["claude", *CLAUDE_ARGS]
+            env = {"ANTHROPIC_API_KEY": api_key}
+        else:
+            cmd = ["codex", *CODEX_ARGS]
+            env = {"OPENAI_API_KEY": api_key}
+        if job["model"]:
+            cmd += ["--model", job["model"]]
+        cmd.append(prompt)
+
+        proc = run(cmd, cwd=workdir, env=env, timeout=AGENT_TIMEOUT, user=AGENT_USER)
+        if proc.returncode != 0:
+            return False, f"The agent exited {proc.returncode} while resolving the conflict."
+
+        # Never ship a file that still carries markers, whatever the agent claims.
+        # Scan ONLY the files that were conflicted, and match only the two markers
+        # git always writes with a label after them. A bare `=======` line is not
+        # evidence: it is ordinary Markdown heading underlining, which made this
+        # check fail resolutions that were in fact correct.
+        left = git(["diff", "--name-only", "--diff-filter=U"], cwd=workdir, timeout=60,
+                   user=AGENT_USER).stdout.strip()
+        still_marked = [
+            f for f in conflicted
+            if run(["grep", "-lE", r"^(<{7}|>{7}) ", os.path.join(workdir, f)],
+                   timeout=30).returncode == 0
+        ]
+        if left or still_marked:
+            detail = ", ".join(still_marked) if still_marked else left.replace("\n", ", ")
+            return False, f"Conflict markers were still present after the agent ran ({detail})."
+
+        git(["add", "-A"], cwd=workdir, timeout=120, user=AGENT_USER)
+        commit = git(["commit", "-m", f"Merge {base_branch} into {branch} (conflicts resolved by agent)"],
+                     cwd=workdir, timeout=120, user=AGENT_USER)
+        if commit.returncode != 0 and "nothing to commit" not in (commit.stdout + commit.stderr):
+            return False, "Could not commit the resolved merge."
+        push = git(["push", "origin", branch], cwd=workdir, token=token, timeout=600)
+        if push.returncode != 0:
+            return False, "Could not push the resolved branch."
+        await event(pool, job_id, "conflict", "Conflicts resolved and pushed.")
+        return True, f"Resolved conflicts in {len(conflicted)} file(s)."
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
+
+
+async def merge_pr(pool, job, repo: str, token: str, base_branch: str) -> tuple[bool, str | None, str]:
+    """Merge a finished job's PR into the base branch. Returns (ok, sha, detail).
+
+    Merging happens as soon as the agent finishes, not at deploy time. Two jobs
+    branched from the same commit are each mergeable on their own, and it is the
+    FIRST merge that strands the second — so merging early, one job at a time,
+    keeps conflicts small and lets the agent resolve them while its work is still
+    the only thing in flight.
+    """
+    job_id, pr_number = job["id"], job["pr_number"]
+    if pr_number is None:
+        return False, None, "The job has no pull request to merge."
+
+    async with httpx.AsyncClient(timeout=30) as c:
+        current = await c.get(
+            f"{GITHUB_API}/repos/{repo}/pulls/{pr_number}", headers=gh_headers(token)
+        )
+    if current.status_code == 200 and current.json().get("merged"):
+        return True, current.json().get("merge_commit_sha"), "Already merged."
+
+    merge_body = {
+        "merge_method": os.environ.get("AGENT_MERGE_METHOD", "squash"),
+        "commit_title": f"PR #{pr_number}: {job['title']}"[:250],
+    }
+    merge = await gh_put(token, f"/repos/{repo}/pulls/{pr_number}/merge", merge_body)
+
+    if merge.status_code != 200:
+        detail = merge.json().get("message", merge.text[:300]) if merge.text else merge.text
+        if "conflict" not in detail.lower() and merge.status_code != 405:
+            return False, None, f"GitHub refused to merge PR #{pr_number}: {detail}"
+
+        log(f"job {job_id}: PR #{pr_number} conflicts — resolving")
+        await event(pool, job_id, "conflict", "Merge conflict; the agent is resolving it…")
+        resolved, why = await resolve_conflicts(pool, job, repo, token, base_branch)
+        if not resolved:
+            return False, None, f"PR #{pr_number} has conflicts that couldn't be resolved: {why}"
+
+        # GitHub recomputes mergeability asynchronously after a push.
+        merge = None
+        for _ in range(10):
+            await asyncio.sleep(3)
+            async with httpx.AsyncClient(timeout=30) as c:
+                pr = await c.get(
+                    f"{GITHUB_API}/repos/{repo}/pulls/{pr_number}", headers=gh_headers(token)
+                )
+            if pr.status_code == 200 and pr.json().get("mergeable") is True:
+                merge = await gh_put(token, f"/repos/{repo}/pulls/{pr_number}/merge", merge_body)
+                break
+        if merge is None or merge.status_code != 200:
+            again = merge.json().get("message", "") if merge is not None and merge.text else "still not mergeable"
+            return False, None, f"PR #{pr_number} wouldn't merge after resolving: {again}"
+
+    return True, merge.json().get("sha"), "Merged."
+
+
+async def claim_merge_retry(pool):
+    """A job whose auto-merge failed and that an operator asked to retry."""
     return await pool.fetchrow(
         """
-        UPDATE dev_deployments SET status = 'merging'
+        UPDATE dev_jobs SET merge_requested = false, updated_at = now()
+        WHERE id = (
+            SELECT id FROM dev_jobs
+            WHERE merge_requested AND status = 'deployment_ready' AND pr_number IS NOT NULL
+            ORDER BY updated_at LIMIT 1 FOR UPDATE SKIP LOCKED
+        )
+        RETURNING *
+        """
+    )
+
+
+async def retry_merge(pool, job) -> None:
+    """Re-attempt the merge (conflicts and all) for a job that needed a nudge."""
+    job_id = job["id"]
+    log(f"job {job_id}: retrying merge of PR #{job['pr_number']}")
+    config = await load_config(pool)
+    token = await get_secret(pool, TOKEN_SECRET_NAME)
+    repo = config["repo_full_name"]
+    if not repo or not token:
+        await pool.execute(
+            "UPDATE dev_jobs SET error = $2, updated_at = now() WHERE id = $1",
+            job_id, "Repository or GitHub token is not configured.",
+        )
+        return
+    ok, merge_sha, detail = await merge_pr(pool, job, repo, token, config["base_branch"])
+    if ok:
+        await pool.execute(
+            """
+            UPDATE dev_jobs SET status = 'merged', commit_sha = COALESCE($2, commit_sha),
+                                merged_at = now(), error = NULL, updated_at = now()
+            WHERE id = $1
+            """,
+            job_id, merge_sha,
+        )
+        await event(pool, job_id, "merged", "Merged — waiting for the next release.")
+    else:
+        await pool.execute(
+            "UPDATE dev_jobs SET error = $2, updated_at = now() WHERE id = $1",
+            job_id, detail[:2000],
+        )
+        await event(pool, job_id, "failed", detail)
+    log(f"job {job_id}: merge retry {'succeeded' if ok else 'failed'}")
+
+
+async def claim_release(pool):
+    """Releases are the only kind of deployment now: rebuild whatever is on the
+    base branch and stamp every merged job as shipped."""
+    return await pool.fetchrow(
+        """
+        UPDATE dev_deployments SET status = 'deploying'
         WHERE id = (
             SELECT id FROM dev_deployments WHERE status = 'pending'
             ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED
@@ -613,90 +954,70 @@ async def claim_deployment(pool):
     )
 
 
-async def finish_deployment(pool, dep_id: int, job_id: int | None, ok: bool,
-                            error: str | None = None, log_text: str = "") -> None:
-    await pool.execute(
-        """
-        UPDATE dev_deployments SET status = $2, error = $3, log = $4, finished_at = now()
-        WHERE id = $1
-        """,
-        dep_id, "deployed" if ok else "failed", (error or None), tail(log_text),
-    )
-    if job_id is not None:
-        # A failed deploy leaves the PR ready to try again, not stuck "deploying".
-        await pool.execute(
-            """
-            UPDATE dev_jobs SET status = $2, error = $3, updated_at = now()
-            WHERE id = $1
-            """,
-            job_id, "deployed" if ok else "deployment_ready", (None if ok else error),
-        )
-        await event(pool, job_id, "deployed" if ok else "failed",
-                    "Deployed." if ok else f"Deploy failed: {error}")
-    log(f"deployment {dep_id} {'succeeded' if ok else 'failed'}")
+async def finish_release(pool, rel_id: int, ok: bool, error: str | None = None,
+                         log_text: str = "") -> None:
+    """Close out a release and move every job it covered to its final state."""
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute(
+                """
+                UPDATE dev_deployments SET status = $2, error = $3, log = $4, finished_at = now()
+                WHERE id = $1
+                """,
+                rel_id, "deployed" if ok else "failed", (error or None), tail(log_text),
+            )
+            if ok:
+                await conn.execute(
+                    """
+                    UPDATE dev_jobs SET status = 'deployed', error = NULL, updated_at = now()
+                    WHERE release_id = $1
+                    """,
+                    rel_id,
+                )
+            else:
+                # A failed release puts its jobs back in the queue rather than
+                # stranding them in 'deploying' — they are still merged.
+                await conn.execute(
+                    """
+                    UPDATE dev_jobs SET status = 'merged', release_id = NULL,
+                                        error = $2, updated_at = now()
+                    WHERE release_id = $1
+                    """,
+                    rel_id, error,
+                )
+    jobs = await pool.fetch("SELECT id FROM dev_jobs WHERE release_id = $1", rel_id)
+    for j in jobs:
+        await event(pool, j["id"], "deployed" if ok else "failed",
+                    "Deployed." if ok else f"Release failed: {error}")
+    log(f"release {rel_id} {'succeeded' if ok else 'failed'}")
 
 
-async def run_deployment(pool, dep) -> None:
-    """Merge the PR, then hand the host rebuild to a detached sibling container."""
-    dep_id, job_id = dep["id"], dep["job_id"]
-    log(f"deployment {dep_id} claimed (PR #{dep['pr_number']})")
+async def run_release(pool, rel) -> None:
+    """Pull the base branch and rebuild the stack once, for every merged job."""
+    rel_id = rel["id"]
+    log(f"release {rel_id} claimed ({rel['job_count']} job(s))")
 
     config = await load_config(pool)
-    repo = config["repo_full_name"]
     token = await get_secret(pool, TOKEN_SECRET_NAME)
-    if not repo or not token:
-        return await finish_deployment(pool, dep_id, job_id, False,
-                                       "Repository or GitHub token is not configured.")
     if not config["deploy_enabled"]:
-        return await finish_deployment(pool, dep_id, job_id, False, "Deploy is switched off.")
-
-    job_title = None
-    if job_id is not None:
-        job_title = await pool.fetchval("SELECT title FROM dev_jobs WHERE id = $1", job_id)
+        return await finish_release(pool, rel_id, False, "Deploy is switched off.")
+    if not token:
+        return await finish_release(pool, rel_id, False, "GitHub token is not configured.")
 
     try:
-        # Merging is the one step that isn't safely repeatable, so check first.
-        # This also makes recovery cheap: a run interrupted between the merge and
-        # the rebuild is simply re-claimed and picks up from here.
-        async with httpx.AsyncClient(timeout=30) as c:
-            current = await c.get(
-                f"{GITHUB_API}/repos/{repo}/pulls/{dep['pr_number']}", headers=gh_headers(token)
-            )
-        already_merged = current.status_code == 200 and current.json().get("merged")
-
-        if already_merged:
-            merge_sha = current.json().get("merge_commit_sha")
-            log(f"deployment {dep_id}: PR #{dep['pr_number']} was already merged")
-        else:
-            merge = await gh_put(
-                token, f"/repos/{repo}/pulls/{dep['pr_number']}/merge",
-                {
-                    "merge_method": os.environ.get("AGENT_MERGE_METHOD", "squash"),
-                    "commit_title": f"{dep['version_label']}: {job_title or 'agent change'}"[:250],
-                },
-            )
-            if merge.status_code != 200:
-                detail = merge.json().get("message", merge.text[:300]) if merge.text else merge.text
-                return await finish_deployment(
-                    pool, dep_id, job_id, False,
-                    f"GitHub refused to merge PR #{dep['pr_number']}: {detail}",
-                )
-            merge_sha = merge.json().get("sha")
-        await pool.execute(
-            "UPDATE dev_deployments SET merge_sha = $2, status = 'deploying' WHERE id = $1",
-            dep_id, merge_sha,
-        )
-        if job_id is not None:
-            await event(pool, job_id, "merged", f"Merged PR #{dep['pr_number']} ({(merge_sha or '')[:8]}).")
-
-        checkout = config["checkout_path"]
-        container_name = f"tillforty-deploy-{dep_id}"
+        checkout = CHECKOUT_PATH
+        container_name = f"tillforty-deploy-{rel_id}"
         run(["docker", "rm", "-f", container_name], timeout=60)
         # NOT --rm: the exit code must survive for reconcile_deployments to read,
         # since ./start.sh restarts this very runner mid-deploy.
         started = run(
             [
                 "docker", "run", "-d", "--name", container_name,
+                # start.sh finishes by polling http://localhost:$API_PORT/ready.
+                # In its own network namespace that loopback is the container's,
+                # not the host's, so the check could never pass and every deploy
+                # burned the full readiness timeout before reporting success.
+                "--network", "host",
                 "-v", "/var/run/docker.sock:/var/run/docker.sock",
                 "-v", f"{checkout}:{checkout}",
                 "-e", f"CHECKOUT={checkout}",
@@ -708,21 +1029,20 @@ async def run_deployment(pool, dep) -> None:
             timeout=120,
         )
         if started.returncode != 0:
-            return await finish_deployment(
-                pool, dep_id, job_id, False,
-                "Could not start the deploy container.",
+            return await finish_release(
+                pool, rel_id, False, "Could not start the deploy container.",
                 started.stdout + started.stderr,
             )
         container_id = started.stdout.strip()
         await pool.execute(
-            "UPDATE dev_deployments SET container_id = $2 WHERE id = $1", dep_id, container_id
+            "UPDATE dev_deployments SET container_id = $2 WHERE id = $1", rel_id, container_id
         )
-        log(f"deployment {dep_id}: rebuild running in {container_name} ({container_id[:12]})")
+        log(f"release {rel_id}: rebuild running in {container_name} ({container_id[:12]})")
         # From here on it's reconcile_deployments' job — this process may be
         # restarted by the very rebuild it just launched.
     except Exception:  # noqa: BLE001
-        await finish_deployment(pool, dep_id, job_id, False,
-                                "The runner crashed while deploying.", traceback.format_exc())
+        await finish_release(pool, rel_id, False,
+                             "The runner crashed while deploying.", traceback.format_exc())
 
 
 async def reconcile_deployments(pool) -> None:
@@ -736,21 +1056,21 @@ async def reconcile_deployments(pool) -> None:
             ["docker", "inspect", "-f", "{{.State.Status}} {{.State.ExitCode}}", cid], timeout=60
         )
         if inspect.returncode != 0:
-            await finish_deployment(pool, dep["id"], dep["job_id"], False,
-                                    "The deploy container disappeared before it reported a result.")
+            await finish_release(pool, dep["id"], False,
+                                 "The deploy container disappeared before it reported a result.")
             continue
         state, _, code = inspect.stdout.strip().partition(" ")
         if state == "running":
             age = (datetime.now(timezone.utc) - dep["created_at"]).total_seconds()
             if age > DEPLOY_TIMEOUT:
                 run(["docker", "rm", "-f", cid], timeout=60)
-                await finish_deployment(pool, dep["id"], dep["job_id"], False,
-                                        f"The deploy timed out after {DEPLOY_TIMEOUT}s.")
+                await finish_release(pool, dep["id"], False,
+                                     f"The deploy timed out after {DEPLOY_TIMEOUT}s.")
             continue
         logs = run(["docker", "logs", "--tail", "400", cid], timeout=60)
         ok = code.strip() == "0"
-        await finish_deployment(
-            pool, dep["id"], dep["job_id"], ok,
+        await finish_release(
+            pool, dep["id"], ok,
             None if ok else f"The rebuild exited with code {code.strip()}.",
             logs.stdout + logs.stderr,
         )
@@ -762,7 +1082,8 @@ async def main() -> None:
     log("development agent runner starting")
     os.makedirs(WORKSPACE, exist_ok=True)
     pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=4)
-    probe_cache: dict = {}
+    start_heartbeat_thread()
+    start_deploy_thread()
 
     # Work left mid-flight by a crash — or by the rebuild that restarted us —
     # would otherwise sit in a non-terminal status forever. Both are safe to
@@ -777,14 +1098,6 @@ async def main() -> None:
 
     while True:
         try:
-            await heartbeat(pool, probe_cache)
-            await reconcile_deployments(pool)
-
-            dep = await claim_deployment(pool)
-            if dep is not None:
-                await run_deployment(pool, dep)
-                continue
-
             job = await claim_job(pool)
             if job is not None:
                 await run_job(pool, job)

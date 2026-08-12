@@ -170,13 +170,18 @@ export interface Dictionary {
     | 'attachments' | 'attach' | 'attachHint' | 'removeFile' | 'downloadFile'
     | 'fileTooLarge' | 'filesTooLarge' | 'tooManyFiles'
     | 'jobsEmpty' | 'jobsEmptyTitle'
+    | 'pendingTitle' | 'deployedTitle' | 'deployedEmpty' | 'deployedEmptyTitle'
     | 'colJob' | 'colAgent' | 'colStatus' | 'colPr' | 'colDeployed' | 'colCreated'
-    | 'status_pending' | 'status_running' | 'status_answer_pending'
+    | 'colStartedBy' | 'startedBy'
+    | 'status_pending' | 'status_running' | 'status_answer_pending' | 'status_merged'
     | 'status_deployment_ready' | 'status_deploying' | 'status_deployed'
     | 'status_failed' | 'status_cancelled'
     | 'agent_claude_code' | 'agent_codex'
     | 'answer' | 'answerTitle' | 'answerHint' | 'yourAnswer' | 'sendAnswer' | 'answerFailed'
+    | 'editTitle' | 'editHint' | 'editFailed'
     | 'deploy' | 'deployDisabled' | 'deployFailed'
+    | 'retryMerge' | 'mergeFailed' | 'readyCount' | 'readyHint'
+    | 'deployAll' | 'deploying' | 'releaseFailed'
     | 'retry' | 'retryFailed' | 'cancelFailed'
     | 'timeline' | 'log' | 'openPr' | 'close'
     | 'loadFailed' | 'createFailed'
@@ -551,7 +556,7 @@ export const en: Dictionary = {
     deployEnabledHint:
       'When on, Deploy merges the pull request and rebuilds this server. Leave off to merge manually instead.',
     checkoutPath: 'Server checkout path',
-    checkoutPathHint: 'The directory on this server that is pulled and rebuilt when you deploy.',
+    checkoutPathHint: 'Set by APP_CHECKOUT_PATH in .env — the container mounts this exact path, so it can only be changed there followed by ./start.sh.',
     runnerOnline: 'Agent runner online',
     runnerOffline: 'Agent runner offline',
     runnerOfflineHint: 'Set AGENT_ENABLED=true in .env and run ./start.sh.',
@@ -592,15 +597,22 @@ export const en: Dictionary = {
     tooManyFiles: 'At most {max} files can be attached to one job.',
     jobsEmpty: 'Jobs you start will appear here with their progress.',
     jobsEmptyTitle: 'No jobs yet',
+    pendingTitle: 'Pending deploy',
+    deployedTitle: 'Deployed',
+    deployedEmpty: 'Jobs appear here once a release ships them.',
+    deployedEmptyTitle: 'Nothing deployed yet',
     colJob: 'Job',
     colAgent: 'Agent',
     colStatus: 'Status',
     colPr: 'Pull request',
     colDeployed: 'Deployed version',
     colCreated: 'Created',
+    colStartedBy: 'Started by',
+    startedBy: 'started by',
     status_pending: 'Pending',
     status_running: 'Building',
     status_answer_pending: 'Answer pending',
+    status_merged: 'Ready to deploy',
     status_deployment_ready: 'Deployment ready',
     status_deploying: 'Deploying',
     status_deployed: 'Deployed',
@@ -608,6 +620,9 @@ export const en: Dictionary = {
     status_cancelled: 'Cancelled',
     agent_claude_code: 'Claude Code',
     agent_codex: 'OpenAI Codex',
+    editTitle: 'Edit job',
+    editHint: 'The job hasn’t started yet, so you can still reword it. The title is regenerated.',
+    editFailed: 'Failed to save the prompt',
     answer: 'Answer',
     answerTitle: 'The agent has a question',
     answerHint: 'Answer it and the job continues from where it stopped.',
@@ -615,6 +630,13 @@ export const en: Dictionary = {
     sendAnswer: 'Send and continue',
     answerFailed: 'Failed to send the answer',
     deploy: 'Deploy',
+    retryMerge: 'Retry merge',
+    mergeFailed: 'Failed to merge the pull request',
+    readyCount: '{count} merged and waiting to deploy.',
+    readyHint: 'They ship together in a single rebuild.',
+    deployAll: 'Deploy all ({count})',
+    deploying: 'Deploying…',
+    releaseFailed: 'Failed to start the release',
     deployDisabled: 'Deploys are switched off in Settings › App › Development.',
     deployFailed: 'Failed to start the deploy',
     retry: 'Retry',
