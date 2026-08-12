@@ -168,7 +168,7 @@ On first run this:
 1. Creates `.env` from `.env.example` and **auto-generates** the database password,
    `JWT_SECRET`, `VAULT_KEY`, and the seed admin password (printed once).
 2. Builds the images and starts the services in order:
-   **Postgres → migrations (run in numeric order) → API → web**.
+   **Postgres → migrations (run in filename order) → API → web**.
 3. Waits for the API's `/ready` check, then prints the URLs + admin login.
 
 | Service | URL (default ports) |
@@ -332,7 +332,7 @@ app-boilerplate/
 │  ├─ app/{db,security,auth,oauth,roles,vault,files,vectors,llm,main}.py
 │  ├─ requirements.txt
 │  └─ .env.example
-└─ migrations/          # SQL — run in order
+└─ migrations/          # SQL — run in filename order, idempotent
    ├─ 0001_extensions.sql
    ├─ 0002_users.sql
    ├─ 0003_files.sql
@@ -345,16 +345,28 @@ app-boilerplate/
 
 ## Database / SQL migration
 
-Run the migrations **in numeric order** against your app's Postgres database. The
+Run the migrations **in filename order** against your app's Postgres database. The
 backend also creates these tables idempotently on startup (`ensure_schema*`), so
 the files double as documentation of the canonical schema.
 
 ```bash
 # all of them, in order
-for f in migrations/0*.sql; do
+LC_ALL=C
+for f in migrations/*.sql; do
   psql "$DATABASE_URL" -f "$f"
 done
 ```
+
+**Naming new migrations.** The `0001`–`0014` files are historical. Anything you
+add from here on gets a **timestamp** prefix instead — `YYYYMMDDHHMM_name.sql`,
+e.g. `202608121530_add_invoices.sql`. Timestamps sort after the numbered files
+and, unlike a counter, two people (or a client fork and this boilerplate) can
+never pick the same one. The `migrate` service refuses to start if two files
+share a prefix, rather than applying both in an order nobody chose.
+
+Every migration must be **idempotent** — `CREATE TABLE IF NOT EXISTS`, `ADD
+COLUMN IF NOT EXISTS`, and so on. There is no ledger of what has been applied;
+the whole directory replays on every boot.
 
 Dependency order matters: `0001` enables `pgcrypto` (needed by the vault in
 `0004`); `0002` creates `users` (referenced by anything you add that ties rows to

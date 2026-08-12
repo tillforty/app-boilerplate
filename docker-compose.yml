@@ -1,4 +1,7 @@
-name: tillforty-app
+# Project name prefixes every container, network and volume. Override per client
+# install in .env — but only on a FRESH install: changing it later orphans the
+# existing volumes (Postgres data included) under the old prefix.
+name: ${COMPOSE_PROJECT_NAME:-tillforty-app}
 
 # Shared config for every GlitchTip container (web/worker/migrate). Defined as a
 # top-level extension field (x-*, ignored by Compose) so the three services can
@@ -35,7 +38,7 @@ services:
       timeout: 5s
       retries: 10
 
-  # ── One-shot SQL migrations (run in numeric order, then exit) ────────────
+  # ── One-shot SQL migrations (run in filename order, then exit) ───────────
   migrate:
     image: postgres:16-alpine
     restart: "no"
@@ -49,8 +52,17 @@ services:
     command:
       - |
         set -e
+        # Byte order, not locale order, so every host applies the same sequence.
+        export LC_ALL=C
+        # Two lineages adding a migration on the same number is the classic fork
+        # hazard: both files apply, in an order nobody chose. Refuse to guess.
+        dupes="$$(basename -a /migrations/*.sql | cut -d_ -f1 | sort | uniq -d)"
+        if [ -n "$$dupes" ]; then
+          echo "Duplicate migration prefixes — rename one side: $$dupes" >&2
+          exit 1
+        fi
         echo "Running migrations in order against $$DATABASE_URL"
-        for f in /migrations/0*.sql; do
+        for f in /migrations/*.sql; do
           echo "→ applying $$f"
           psql "$$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$$f"
         done
@@ -85,7 +97,9 @@ services:
   agent_runner:
     build: ./agent-runner
     # Pinned name so the runner can launch a deploy sibling from this same image.
-    image: tillforty-agent-runner:local
+    # Give each client install its own tag, or two stacks on one host fight over
+    # which build the tag points at.
+    image: ${AGENT_RUNNER_IMAGE:-tillforty-agent-runner:local}
     restart: unless-stopped
     profiles: ["agent"]
     env_file: .env
@@ -95,7 +109,7 @@ services:
       migrate:
         condition: service_completed_successfully
     environment:
-      AGENT_RUNNER_IMAGE: tillforty-agent-runner:local
+      AGENT_RUNNER_IMAGE: ${AGENT_RUNNER_IMAGE:-tillforty-agent-runner:local}
     volumes:
       - agent_work:/work
       # Lets the runner drive the HOST daemon to rebuild the stack on Deploy.

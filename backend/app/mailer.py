@@ -105,7 +105,7 @@ def _send_via_resend(
                 "Content-Type": "application/json",
                 # Resend's API sits behind Cloudflare, which blocks some default
                 # client User-Agents (e.g. python-urllib) with a 1010 error.
-                "User-Agent": "tillforty-mailer/1.0",
+                "User-Agent": "app-mailer/1.0",
             },
             timeout=timeout,
         )

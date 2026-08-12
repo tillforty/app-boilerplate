@@ -52,6 +52,11 @@ WORKSPACE = os.environ.get("AGENT_WORKSPACE", "/work")
 CHECKOUT_PATH = os.environ.get("APP_CHECKOUT_PATH", "/opt/app-boilerplate")
 AGENT_USER = os.environ.get("AGENT_USER", "agent")
 
+# Authorship stamped on the commits the agent writes. Set these per install so a
+# client's history is attributed to that client, not to whoever built the stack.
+AGENT_GIT_NAME = os.environ.get("AGENT_GIT_NAME", "Development agent")
+AGENT_GIT_EMAIL = os.environ.get("AGENT_GIT_EMAIL", "agent@localhost")
+
 # Image used for the detached deploy sibling. Defaults to this same image, which
 # already carries git + bash + the docker CLI.
 DEPLOY_IMAGE = os.environ.get("AGENT_RUNNER_IMAGE", "tillforty-agent-runner:local")
@@ -586,8 +591,8 @@ async def run_job(pool, job) -> None:
                 "\n".join(transcript),
             )
 
-        git(["config", "user.email", "agent@tillforty.local"], cwd=workdir, timeout=30, user=AGENT_USER)
-        git(["config", "user.name", "Tillforty development agent"], cwd=workdir, timeout=30, user=AGENT_USER)
+        git(["config", "user.email", AGENT_GIT_EMAIL], cwd=workdir, timeout=30, user=AGENT_USER)
+        git(["config", "user.name", AGENT_GIT_NAME], cwd=workdir, timeout=30, user=AGENT_USER)
         add = git(["add", "-A"], cwd=workdir, timeout=120, user=AGENT_USER)
         record("git add -A", add)
         commit = git(
@@ -761,8 +766,8 @@ async def resolve_conflicts(pool, job, repo: str, token: str, base_branch: str) 
         if clone.returncode != 0:
             return False, "Could not clone the branch to resolve the conflict."
         run(["chown", "-R", f"{AGENT_USER}:{AGENT_USER}", workdir], timeout=120)
-        git(["config", "user.email", "agent@tillforty.local"], cwd=workdir, timeout=30, user=AGENT_USER)
-        git(["config", "user.name", "Tillforty development agent"], cwd=workdir, timeout=30, user=AGENT_USER)
+        git(["config", "user.email", AGENT_GIT_EMAIL], cwd=workdir, timeout=30, user=AGENT_USER)
+        git(["config", "user.name", AGENT_GIT_NAME], cwd=workdir, timeout=30, user=AGENT_USER)
 
         fetch = git(["fetch", "origin", base_branch], cwd=workdir, token=token, timeout=300)
         if fetch.returncode != 0:

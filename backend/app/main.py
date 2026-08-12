@@ -101,4 +101,4 @@ async def ready() -> JSONResponse:
 
 @app.get("/")
 async def root() -> dict:
-    return {"service": "tillforty-app-api"}
+    return {"service": os.environ.get("APP_SERVICE_NAME", "app-api")}
