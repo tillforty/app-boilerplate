@@ -1,21 +1,34 @@
-import { useEffect } from 'react'
+import { lazy, Suspense, useEffect } from 'react'
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import ProtectedRoute from '@/components/ProtectedRoute'
 import AppLayout from '@/components/layout/AppLayout'
-import LoginPage from '@/pages/LoginPage'
-import OAuthCallback from '@/pages/OAuthCallback'
-import OnboardingPage from '@/pages/OnboardingPage'
-import DashboardPage from '@/pages/DashboardPage'
-import CustomersPage from '@/pages/CustomersPage'
-import ComponentsPage from '@/pages/ComponentsPage'
-import UsersPage from '@/pages/UsersPage'
-import RolesPage from '@/pages/RolesPage'
-import SettingsPage from '@/pages/SettingsPage'
-import ProfilePage from '@/pages/ProfilePage'
-import DocumentsPage from '@/pages/DocumentsPage'
-import InvitePage from '@/pages/InvitePage'
 import { useAppSettings } from '@/context/AppSettingsContext'
 import { useTranslation } from '@/i18n'
+
+// Route-level code-splitting: each page ships in its own chunk and loads on
+// demand, so the initial bundle (and heavy deps like charts) no longer land on
+// first paint / the login screen.
+const LoginPage = lazy(() => import('@/pages/LoginPage'))
+const OAuthCallback = lazy(() => import('@/pages/OAuthCallback'))
+const OnboardingPage = lazy(() => import('@/pages/OnboardingPage'))
+const DashboardPage = lazy(() => import('@/pages/DashboardPage'))
+const CustomersPage = lazy(() => import('@/pages/CustomersPage'))
+const ComponentsPage = lazy(() => import('@/pages/ComponentsPage'))
+const UsersPage = lazy(() => import('@/pages/UsersPage'))
+const RolesPage = lazy(() => import('@/pages/RolesPage'))
+const SettingsPage = lazy(() => import('@/pages/SettingsPage'))
+const ProfilePage = lazy(() => import('@/pages/ProfilePage'))
+const DocumentsPage = lazy(() => import('@/pages/DocumentsPage'))
+const DevelopmentPage = lazy(() => import('@/pages/DevelopmentPage'))
+const InvitePage = lazy(() => import('@/pages/InvitePage'))
+
+function PageFallback() {
+  return (
+    <div className="flex h-screen items-center justify-center bg-background">
+      <div className="h-8 w-8 animate-spin rounded-full border-2 border-muted border-t-primary" />
+    </div>
+  )
+}
 
 export default function App() {
   const { settings, loading } = useAppSettings()
@@ -30,11 +43,7 @@ export default function App() {
   }, [settings, setLanguage])
 
   if (loading) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-background">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-muted border-t-primary" />
-      </div>
-    )
+    return <PageFallback />
   }
 
   // Fresh instance (settings row exists but not onboarded): funnel everything —
@@ -47,6 +56,7 @@ export default function App() {
   }
 
   return (
+    <Suspense fallback={<PageFallback />}>
     <Routes>
       {/* Public */}
       <Route path="/onboarding" element={<OnboardingPage />} />
@@ -57,10 +67,14 @@ export default function App() {
       {/* Authenticated app shell */}
       <Route element={<ProtectedRoute />}>
         <Route element={<AppLayout />}>
-          <Route path="/" element={<DashboardPage />} />
+          {/* Dashboard views are addressable: /dashboard/overview, /dashboard/sales, … */}
+          <Route path="/" element={<Navigate to="/dashboard/overview" replace />} />
+          <Route path="/dashboard" element={<Navigate to="/dashboard/overview" replace />} />
+          <Route path="/dashboard/:view" element={<DashboardPage />} />
           <Route path="/customers" element={<CustomersPage />} />
           <Route path="/components" element={<ComponentsPage />} />
           <Route path="/documents" element={<DocumentsPage />} />
+          <Route path="/development" element={<DevelopmentPage />} />
           <Route path="/profile" element={<ProfilePage />} />
           <Route path="/settings/users" element={<UsersPage />} />
           <Route path="/settings/roles" element={<RolesPage />} />
@@ -68,5 +82,6 @@ export default function App() {
         </Route>
       </Route>
     </Routes>
+    </Suspense>
   )
 }

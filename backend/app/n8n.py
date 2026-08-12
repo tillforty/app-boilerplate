@@ -9,9 +9,12 @@ A webhook's full URL is {N8N_WEBHOOK_URL}/{path}, where `path` is the path
 configured on the n8n Webhook trigger node. `fire_webhook` is best-effort: it
 no-ops when nothing is configured, so apps run without n8n in dev.
 """
+import logging
 import os
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 N8N_BASE_URL = os.environ.get("N8N_BASE_URL", "").rstrip("/")
 N8N_WEBHOOK_URL = (
@@ -42,5 +45,6 @@ async def fire_webhook(path: str, payload: dict, *, timeout: float = 10.0) -> No
         async with httpx.AsyncClient(timeout=timeout) as client:
             await client.post(webhook_url(path), json=payload)
     except httpx.HTTPError:
-        # Best-effort: swallow so the caller's primary work still succeeds.
-        pass
+        # Best-effort: log and continue so the caller's primary work still
+        # succeeds, but don't swallow the failure silently.
+        logger.warning("n8n webhook POST to %r failed", path, exc_info=True)

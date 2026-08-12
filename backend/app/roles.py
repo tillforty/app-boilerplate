@@ -34,7 +34,7 @@ PERMISSION_CATALOG: list[dict] = [
     {"resource": "vault", "label": "Vault", "actions": ["read", "write"]},
     {"resource": "customers", "label": "Customers", "actions": ["read", "create", "update", "delete"]},
     {"resource": "emails", "label": "Emails", "actions": ["read", "sync", "delete", "configure"]},
-    {"resource": "ai", "label": "AI", "actions": ["use"]},
+    {"resource": "ai", "label": "AI", "actions": ["use", "manage"]},
 ]
 
 ALL_PERMISSIONS = {f"{g['resource']}:{a}" for g in PERMISSION_CATALOG for a in g["actions"]}
@@ -140,13 +140,27 @@ def require_permission(permission: str):
     return dependency
 
 
-def _clean_permissions(perms: list[str]) -> list[str]:
-    """Reject unknown keys and de-duplicate while keeping order."""
+def _clean_permissions(perms: list[str], caller_perms: set[str]) -> list[str]:
+    """Reject unknown keys, de-duplicate while keeping order, and forbid granting
+    any permission the caller does not itself hold (privilege-escalation guard).
+
+    A caller with the wildcard '*' may grant anything; everyone else may only
+    grant permissions contained in their own effective set — and '*' itself
+    requires '*'. This stops a holder of merely 'roles:manage' from minting a
+    role with '*' (or any permission they lack) and escalating through it.
+    """
     unknown = [p for p in perms if p != WILDCARD and p not in ALL_PERMISSIONS]
     if unknown:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST, f"Unknown permissions: {sorted(set(unknown))}"
         )
+    if WILDCARD not in caller_perms:
+        escalating = sorted({p for p in perms if p not in caller_perms})
+        if escalating:
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                f"You cannot grant permissions you do not hold: {escalating}",
+            )
     seen: set[str] = set()
     out: list[str] = []
     for p in perms:
@@ -185,9 +199,10 @@ async def list_roles(_: UserOut = Depends(get_current_user)) -> list[Role]:
 
 @router.post("", response_model=Role, status_code=status.HTTP_201_CREATED)
 async def create_role(
-    body: RoleCreate, _: UserOut = Depends(require_permission("roles:manage"))
+    body: RoleCreate, user: UserOut = Depends(require_permission("roles:manage"))
 ) -> Role:
-    perms = _clean_permissions(body.permissions)
+    caller_perms = await get_user_permissions(user.id)
+    perms = _clean_permissions(body.permissions, caller_perms)
     try:
         row = await db.get_pool().fetchrow(
             "INSERT INTO roles (name, description, permissions) VALUES ($1, $2, $3) "
@@ -216,7 +231,7 @@ async def get_role(role_id: int, _: UserOut = Depends(get_current_user)) -> Role
 async def update_role(
     role_id: int,
     body: RoleUpdate,
-    _: UserOut = Depends(require_permission("roles:manage")),
+    user: UserOut = Depends(require_permission("roles:manage")),
 ) -> Role:
     row = await db.get_pool().fetchrow("SELECT * FROM roles WHERE id = $1", role_id)
     if row is None:
@@ -236,7 +251,8 @@ async def update_role(
     if body.description is not None:
         fields["description"] = body.description
     if body.permissions is not None:
-        fields["permissions"] = _clean_permissions(body.permissions)
+        caller_perms = await get_user_permissions(user.id)
+        fields["permissions"] = _clean_permissions(body.permissions, caller_perms)
     if not fields:
         return Role(**dict(row))
 
@@ -309,11 +325,25 @@ async def activate_role(
 
 @router.put("/assign", status_code=status.HTTP_204_NO_CONTENT)
 async def assign_role(
-    body: AssignRole, _: UserOut = Depends(require_permission("roles:manage"))
+    body: AssignRole, user: UserOut = Depends(require_permission("roles:manage"))
 ) -> None:
-    role = await db.get_pool().fetchval("SELECT 1 FROM roles WHERE id = $1", body.role_id)
-    if not role:
+    role_perms = await db.get_pool().fetchval(
+        "SELECT permissions FROM roles WHERE id = $1", body.role_id
+    )
+    if role_perms is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Role not found")
+    # Privilege-escalation guard: assigning a role grants its permissions, so a
+    # caller may only assign a role whose permissions are a subset of their own
+    # effective set (a caller with '*' may assign anything). Otherwise a holder
+    # of merely 'roles:manage' could assign the administrator role and escalate.
+    caller_perms = await get_user_permissions(user.id)
+    if WILDCARD not in caller_perms:
+        excess = sorted({p for p in role_perms if p not in caller_perms})
+        if excess:
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                f"You cannot assign a role granting permissions you do not hold: {excess}",
+            )
     updated = await db.get_pool().fetchval(
         "UPDATE users SET role_id = $2 WHERE id = $1 RETURNING id",
         body.user_id,

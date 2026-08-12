@@ -4,8 +4,6 @@ Demonstrates how to expose the `llm` helper as a real endpoint. Guarded by the
 'ai:use' permission and returns 503 when no operating-agent API key is set, so
 the boilerplate runs without an LLM configured.
 """
-import os
-
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
@@ -25,16 +23,13 @@ class AskResponse(BaseModel):
     answer: str
 
 
-def _configured() -> bool:
-    return bool(os.environ.get("OPERATING_AGENT_API_KEY"))
-
-
 @router.post("/ask", response_model=AskResponse)
 async def ask(body: AskRequest, _: UserOut = Depends(require_permission("ai:use"))) -> AskResponse:
-    if not _configured():
+    if not await llm.is_agent_configured():
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE,
-            "LLM is not configured (set OPERATING_AGENT_API_KEY)",
+            "LLM is not configured. Bind the Operating agent function to a provider "
+            "in Settings → AI functions, or set OPERATING_AGENT_API_KEY.",
         )
     messages: list[dict] = []
     if body.system:

@@ -73,6 +73,12 @@ if [ ! -f .env ]; then
   set_env N8N_POSTGRES_PASSWORD "$N8N_DB_PASSWORD"
   set_env N8N_ENCRYPTION_KEY    "$N8N_ENC_KEY"
 
+  # Generate GlitchTip secrets (Sentry-compatible error monitoring).
+  GLITCHTIP_SEC="$(gen 32)"
+  GLITCHTIP_DB_PASSWORD="$(gen 16)"
+  set_env GLITCHTIP_SECRET_KEY        "$GLITCHTIP_SEC"
+  set_env GLITCHTIP_POSTGRES_PASSWORD "$GLITCHTIP_DB_PASSWORD"
+
   # Host port mappings (Compose has defaults, but expose them for easy editing).
   grep -q '^WEB_PORT=' .env || printf '\n# Host ports\nWEB_PORT=8080\nAPI_PORT=8000\n' >> .env
 
@@ -93,6 +99,11 @@ if [ ! -f .env ]; then
   [ -n "${N8N_ENABLED:-}" ] && { set_env N8N_ENABLED "$N8N_ENABLED"; info "N8N_ENABLED set from environment: $N8N_ENABLED"; }
   [ -n "${N8N_PORT:-}" ]    && set_env N8N_PORT "$N8N_PORT"
   [ -n "${TIMEZONE:-}" ]    && set_env TIMEZONE "$TIMEZONE"
+
+  # GlitchTip deploy-time overrides.
+  [ -n "${GLITCHTIP_ENABLED:-}" ] && { set_env GLITCHTIP_ENABLED "$GLITCHTIP_ENABLED"; info "GLITCHTIP_ENABLED set from environment: $GLITCHTIP_ENABLED"; }
+  [ -n "${GLITCHTIP_PORT:-}" ]    && set_env GLITCHTIP_PORT "$GLITCHTIP_PORT"
+  [ -n "${GLITCHTIP_DOMAIN:-}" ]  && set_env GLITCHTIP_DOMAIN "$GLITCHTIP_DOMAIN"
 
   # SMTP / outbound-email deploy-time overrides. Lets a fresh project come up
   # with a working mailer (e.g. a Resend API key as SMTP_PASSWORD) WITHOUT the
@@ -115,6 +126,50 @@ else
   info ".env already exists — leaving it untouched."
 fi
 
+# ── GlitchTip config backfill (idempotent) ───────────────────────────────────
+# Installs created before GlitchTip support won't have its keys in .env. Add
+# them once, with freshly generated secrets, so `GLITCHTIP_ENABLED=true` can be
+# flipped later without hand-editing secrets. Disabled by default; honors any
+# GLITCHTIP_* passed in the environment on this run. No-op once the keys exist.
+if ! grep -q '^GLITCHTIP_SECRET_KEY=' .env; then
+  info "Backfilling GlitchTip config into .env (disabled by default)."
+  GT_SECRET="$(gen 32)"; GT_DB_PASSWORD="$(gen 16)"
+  GT_ENABLED="${GLITCHTIP_ENABLED:-false}"
+  GT_PORT="${GLITCHTIP_PORT:-8090}"
+  GT_DOMAIN="${GLITCHTIP_DOMAIN:-http://localhost:${GT_PORT}}"
+  {
+    printf '\n# ── GlitchTip: self-hosted, Sentry-compatible error monitoring ──────────\n'
+    printf '# Added by start.sh. Enable with: GLITCHTIP_ENABLED=true ./start.sh\n'
+    printf 'GLITCHTIP_ENABLED=%s\n' "$GT_ENABLED"
+    printf 'GLITCHTIP_PORT=%s\n' "$GT_PORT"
+    printf 'GLITCHTIP_SECRET_KEY=%s\n' "$GT_SECRET"
+    printf 'GLITCHTIP_POSTGRES_USER=glitchtip\n'
+    printf 'GLITCHTIP_POSTGRES_PASSWORD=%s\n' "$GT_DB_PASSWORD"
+    printf 'GLITCHTIP_POSTGRES_DB=glitchtip\n'
+    printf 'GLITCHTIP_DOMAIN=%s\n' "$GT_DOMAIN"
+    printf 'GLITCHTIP_ENABLE_OPEN_USER_REGISTRATION=true\n'
+    printf 'GLITCHTIP_EMAIL_URL=consolemail://\n'
+    printf 'GLITCHTIP_FROM_EMAIL=glitchtip@localhost\n'
+    printf '# Error capture (Sentry SDK → GlitchTip). Blank = disabled (SDK no-ops).\n'
+    printf 'SENTRY_DSN=\n'
+    printf 'VITE_SENTRY_DSN=\n'
+    printf 'SENTRY_ENVIRONMENT=production\n'
+  } >> .env
+fi
+
+# Issue-reading API keys for the in-app Development › Issues page (idempotent).
+# Blank until you create a GlitchTip auth token + fill the org/project slugs.
+if ! grep -q '^SENTRY_API_TOKEN=' .env; then
+  {
+    printf '# Read issues into the app UI (Development › Issues) via the Sentry REST API.\n'
+    printf '# SENTRY_API_URL blank = use the bundled GlitchTip internal host (http://glitchtip:8080).\n'
+    printf 'SENTRY_API_URL=\n'
+    printf 'SENTRY_API_TOKEN=\n'
+    printf 'SENTRY_ORG_SLUG=\n'
+    printf 'SENTRY_PROJECT_SLUG=\n'
+  } >> .env
+fi
+
 # Source ports for the final summary (defaults match docker-compose.yml).
 WEB_PORT="$(grep -E '^WEB_PORT=' .env | cut -d= -f2 || true)"; WEB_PORT="${WEB_PORT:-8080}"
 API_PORT="$(grep -E '^API_PORT=' .env | cut -d= -f2 || true)"; API_PORT="${API_PORT:-8000}"
@@ -124,6 +179,7 @@ API_PORT="$(grep -E '^API_PORT=' .env | cut -d= -f2 || true)"; API_PORT="${API_P
 # up/down/destroy/logs — consistently includes the caddy service.
 DOMAIN="$(grep -E '^DOMAIN=' .env | cut -d= -f2 || true)"
 N8N_ENABLED="$(grep -E '^N8N_ENABLED=' .env | cut -d= -f2 || true)"
+GLITCHTIP_ENABLED="$(grep -E '^GLITCHTIP_ENABLED=' .env | cut -d= -f2 || true)"
 
 PROFILES=""
 if [ -n "${DOMAIN:-}" ]; then
@@ -133,6 +189,10 @@ fi
 if [ "${N8N_ENABLED:-false}" = "true" ]; then
   PROFILES="${PROFILES:+$PROFILES,}n8n"
   info "N8N_ENABLED=true — n8n + n8n_postgres services will start."
+fi
+if [ "${GLITCHTIP_ENABLED:-false}" = "true" ]; then
+  PROFILES="${PROFILES:+$PROFILES,}glitchtip"
+  info "GLITCHTIP_ENABLED=true — GlitchTip + its Postgres/Redis/worker will start (~1GB RAM)."
 fi
 if [ -n "$PROFILES" ]; then
   export COMPOSE_PROFILES="$PROFILES"
@@ -191,6 +251,10 @@ EOF
 fi
 if [ "${N8N_ENABLED:-false}" = "true" ]; then
   printf '  n8n:        http://localhost:%s\n\n' "$N8N_PORT_VAL"
+fi
+GLITCHTIP_PORT_VAL="$(grep -E '^GLITCHTIP_PORT=' .env | cut -d= -f2 || true)"; GLITCHTIP_PORT_VAL="${GLITCHTIP_PORT_VAL:-8090}"
+if [ "${GLITCHTIP_ENABLED:-false}" = "true" ]; then
+  printf '  GlitchTip:  http://localhost:%s   (create org+project, then paste its DSN into SENTRY_DSN/VITE_SENTRY_DSN)\n\n' "$GLITCHTIP_PORT_VAL"
 fi
 
 if [ -n "$ADMIN_PASSWORD" ]; then

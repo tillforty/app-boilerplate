@@ -14,6 +14,7 @@ import {
   Component,
   FolderOpen,
   SlidersHorizontal,
+  Code2,
   type LucideIcon,
 } from 'lucide-react'
 // Import the logo as a Vite asset so it gets a content-hashed URL
@@ -22,7 +23,8 @@ import {
 import logoUrl from '@/assets/logo.svg'
 
 export interface NavItem {
-  label: string
+  /** i18n key resolved via t(), e.g. 'nav.dashboard'. Rendered by the Header. */
+  labelKey: string
   href: string
   icon: LucideIcon
   /** Open in a new tab via <a> instead of client-side routing (e.g. API docs). */
@@ -59,16 +61,17 @@ export const appConfig: AppConfig = {
     primary: '79.2 91.4% 54.3%',
   },
   nav: [
-    { label: 'Dashboard', href: '/', icon: LayoutDashboard },
-    { label: 'Customers', href: '/customers', icon: Contact },
-    { label: 'Documents', href: '/documents', icon: FolderOpen },
-    { label: 'Components', href: '/components', icon: Component },
+    { labelKey: 'nav.dashboard', href: '/dashboard', icon: LayoutDashboard },
+    { labelKey: 'nav.customers', href: '/customers', icon: Contact },
+    { labelKey: 'nav.documents', href: '/documents', icon: FolderOpen },
+    { labelKey: 'nav.components', href: '/components', icon: Component },
+    { labelKey: 'nav.development', href: '/development', icon: Code2 },
   ],
   settingsNav: [
-    { label: 'App settings', href: '/settings/app', icon: SlidersHorizontal },
-    { label: 'Users', href: '/settings/users', icon: Users },
-    { label: 'Roles', href: '/settings/roles', icon: Shield },
-    { label: 'API Docs', href: '/api/docs', icon: BookOpen, external: true },
+    { labelKey: 'nav.appSettings', href: '/settings/app', icon: SlidersHorizontal },
+    { labelKey: 'nav.users', href: '/settings/users', icon: Users },
+    { labelKey: 'nav.roles', href: '/settings/roles', icon: Shield },
+    { labelKey: 'nav.apiDocs', href: '/api/docs', icon: BookOpen, external: true },
   ],
   apiDocsUrl: '/api/docs',
 }

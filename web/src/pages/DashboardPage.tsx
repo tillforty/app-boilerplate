@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Navigate, useNavigate, useParams } from 'react-router-dom'
 import { TrendingUp, TrendingDown, Minus } from 'lucide-react'
 import {
   Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, XAxis, YAxis,
@@ -259,15 +260,10 @@ export default function DashboardPage() {
   const { user } = useAuth()
   const { settings } = useAppSettings()
   const currencySymbol = settings?.currency_symbol ?? '€'
-  const [activeDashboard, setActiveDashboard] = useState(DASHBOARDS[0].id)
-  const [loading, setLoading] = useState(true)
+  const { view } = useParams<{ view: string }>()
+  const navigate = useNavigate()
+  const dashboard = DASHBOARDS.find((d) => d.id === view)
   const [stats, setStats] = useState<Stats | null>(null)
-
-  useEffect(() => {
-    setLoading(true)
-    const t = setTimeout(() => setLoading(false), 600)
-    return () => clearTimeout(t)
-  }, [activeDashboard])
 
   // Real figures for the Overview cards.
   useEffect(() => {
@@ -280,10 +276,15 @@ export default function DashboardPage() {
     }
   }, [])
 
-  const dashboard = DASHBOARDS.find((d) => d.id === activeDashboard) ?? DASHBOARDS[0]
+  // Unknown view in the URL → send to the default dashboard.
+  if (!dashboard) {
+    return <Navigate to={`/dashboard/${DASHBOARDS[0].id}`} replace />
+  }
+
   // Overview shows live data; other tabs use their sample KPIs.
   const kpis = dashboard.live ? (stats ? overviewKpis(stats, currencySymbol) : []) : dashboard.kpis
-  const kpisLoading = dashboard.live ? stats === null : loading
+  // Only the live Overview genuinely loads; sample dashboards render instantly.
+  const kpisLoading = dashboard.live ? stats === null : false
 
   return (
     <div className="mx-auto max-w-content space-y-6">
@@ -295,7 +296,7 @@ export default function DashboardPage() {
           </p>
         </div>
 
-        <Select value={activeDashboard} onValueChange={setActiveDashboard}>
+        <Select value={dashboard.id} onValueChange={(id) => navigate(`/dashboard/${id}`)}>
           <SelectTrigger className="sm:w-48">
             <SelectValue />
           </SelectTrigger>
@@ -343,16 +344,9 @@ export default function DashboardPage() {
         <Badge variant="secondary" className="text-[10px]">Sample data</Badge>
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
-        {loading
-          ? Array.from({ length: 2 }).map((_, i) => (
-              <Card key={i}>
-                <CardHeader className="pb-2"><Skeleton className="h-4 w-40" /></CardHeader>
-                <CardContent><Skeleton className="h-48 w-full" /></CardContent>
-              </Card>
-            ))
-          : dashboard.charts.map((chart) => (
-              <DashboardChart key={chart.title} chart={chart} />
-            ))}
+        {dashboard.charts.map((chart) => (
+          <DashboardChart key={chart.title} chart={chart} />
+        ))}
       </div>
     </div>
   )

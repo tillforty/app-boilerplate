@@ -25,11 +25,14 @@ Both transports do blocking I/O; call from a threadpool (e.g.
 fastapi.concurrency.run_in_threadpool) or a background task so the event loop
 isn't stalled.
 """
+import logging
 import os
 import smtplib
 from email.message import EmailMessage
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 
 def _bool(name: str, default: bool) -> bool:
@@ -73,7 +76,11 @@ def _from_address() -> str:
         if s_name:
             name = s_name
     except Exception:
-        pass  # best-effort, matches the mailer's swallow-and-continue ethos
+        # best-effort — fall back to env defaults but don't stay silent.
+        logger.warning(
+            "Failed to read from-identity from settings; using env defaults",
+            exc_info=True,
+        )
     return f"{name} <{email}>" if name else email
 
 
@@ -104,7 +111,9 @@ def _send_via_resend(
         )
         return resp.status_code < 300
     except httpx.HTTPError:
-        # Best-effort: swallow so the caller's primary work still succeeds.
+        # Best-effort: log and return False so the caller's primary work still
+        # succeeds, but don't swallow the failure silently.
+        logger.warning("Resend email send failed", exc_info=True)
         return False
 
 
@@ -133,7 +142,9 @@ def _send_via_smtp(
             smtp.send_message(msg)
         return True
     except (smtplib.SMTPException, OSError):
-        # Best-effort: swallow so the caller's primary work still succeeds.
+        # Best-effort: log and return False so the caller's primary work still
+        # succeeds, but don't swallow the failure silently.
+        logger.warning("SMTP email send failed", exc_info=True)
         return False
 
 

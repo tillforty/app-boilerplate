@@ -1,15 +1,18 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import {
   getAdminSettings,
   updateSettings,
   uploadLogo,
+  getObservabilityStatus,
   CURRENCY_PRESETS,
   COMMON_TIMEZONES,
   type AdminSettings,
+  type ObservabilityStatus,
 } from '@/lib/settings'
 import { useAppSettings } from '@/context/AppSettingsContext'
 import { usePermissions } from '@/context/PermissionsContext'
 import { LANGUAGE_LABELS, useTranslation, type Language } from '@/i18n'
+import { useTabParam } from '@/lib/use-tab-param'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -22,23 +25,56 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import LlmCredentialsTab from '@/components/settings/LlmCredentialsTab'
+import AiFunctionsTab from '@/components/settings/AiFunctionsTab'
 
 const LOGO_MAX_BYTES = 2 * 1024 * 1024
+const SETTINGS_TABS = ['general', 'llm', 'functions'] as const
+type SettingsTab = (typeof SETTINGS_TABS)[number]
 
 export default function SettingsPage() {
   const { t } = useTranslation()
   const { can } = usePermissions()
   const { refresh } = useAppSettings()
   const canManage = can('roles:manage')
+  const canAi = can('ai:manage')
+  const [tab, setTab] = useTabParam<SettingsTab>(SETTINGS_TABS, 'general')
 
   const [form, setForm] = useState<AdminSettings | null>(null)
   const [loading, setLoading] = useState(true)
   const [logoFile, setLogoFile] = useState<File | null>(null)
+  // Preview the picked logo without leaking object URLs: create one per file
+  // and revoke it when the file changes or the component unmounts.
+  const logoPreview = useMemo(
+    () => (logoFile ? URL.createObjectURL(logoFile) : null),
+    [logoFile],
+  )
+  useEffect(() => {
+    if (!logoPreview) return
+    return () => URL.revokeObjectURL(logoPreview)
+  }, [logoPreview])
   const [logoError, setLogoError] = useState<string | null>(null)
   const [logoVersion, setLogoVersion] = useState(0)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const [obs, setObs] = useState<ObservabilityStatus | null>(null)
+
+  useEffect(() => {
+    if (!canManage) return
+    let active = true
+    getObservabilityStatus()
+      .then((s) => {
+        if (active) setObs(s)
+      })
+      .catch(() => {
+        // Non-critical: the error-monitoring card just stays hidden.
+      })
+    return () => {
+      active = false
+    }
+  }, [canManage])
 
   useEffect(() => {
     if (!canManage) {
@@ -123,15 +159,7 @@ export default function SettingsPage() {
       </div>
     )
   }
-  if (loading || !form) {
-    return (
-      <div className="mx-auto max-w-content">
-        <p className="text-sm text-muted-foreground">{t('common.loading')}</p>
-      </div>
-    )
-  }
-
-  const logoSrc = form.logo_url ? `${form.logo_url}?v=${logoVersion}` : null
+  const logoSrc = form?.logo_url ? `${form.logo_url}?v=${logoVersion}` : null
 
   return (
     <div className="mx-auto max-w-content space-y-6">
@@ -140,6 +168,18 @@ export default function SettingsPage() {
         <p className="text-sm text-muted-foreground">{t('settings.subtitle')}</p>
       </div>
 
+      <Tabs value={tab} onValueChange={(v) => setTab(v as SettingsTab)}>
+        <TabsList>
+          <TabsTrigger value="general">{t('settings.tabGeneral')}</TabsTrigger>
+          <TabsTrigger value="llm">{t('settings.tabLlm')}</TabsTrigger>
+          <TabsTrigger value="functions">{t('settings.tabFunctions')}</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="general" className="space-y-6">
+          {loading || !form ? (
+            <p className="text-sm text-muted-foreground">{t('common.loading')}</p>
+          ) : (
+            <>
       {error && (
         <div className="rounded-md border border-destructive/50 bg-destructive/10 px-4 py-2 text-sm text-destructive">
           {error}
@@ -168,9 +208,9 @@ export default function SettingsPage() {
             <div className="space-y-2">
               <Label htmlFor="s-logo">{t('onboarding.logo')}</Label>
               <div className="flex items-center gap-4">
-                {(logoFile || logoSrc) && (
+                {(logoPreview || logoSrc) && (
                   <img
-                    src={logoFile ? URL.createObjectURL(logoFile) : logoSrc!}
+                    src={logoPreview ?? logoSrc!}
                     alt="logo"
                     className="h-10 w-auto"
                   />
@@ -300,6 +340,66 @@ export default function SettingsPage() {
           {saving ? t('common.saving') : t('settings.save')}
         </Button>
       </form>
+
+      {obs && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">{t('observability.title')}</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-sm text-muted-foreground">{t('observability.subtitle')}</p>
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              <span
+                className={`inline-block h-2 w-2 rounded-full ${
+                  obs.capture_configured ? 'bg-green-500' : 'bg-muted-foreground/40'
+                }`}
+              />
+              <span>
+                {obs.capture_configured ? t('observability.active') : t('observability.inactive')}
+              </span>
+              {obs.capture_configured && (
+                <span className="text-muted-foreground">
+                  · {t('observability.environment')}: {obs.environment}
+                </span>
+              )}
+            </div>
+            {!obs.capture_configured && (
+              <p className="text-sm text-muted-foreground">{t('observability.inactiveHint')}</p>
+            )}
+            {obs.ui_url ? (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => window.open(obs.ui_url!, '_blank', 'noopener,noreferrer')}
+              >
+                {t('observability.open')}
+              </Button>
+            ) : (
+              <p className="text-sm text-muted-foreground">{t('observability.noUi')}</p>
+            )}
+          </CardContent>
+        </Card>
+      )}
+            </>
+          )}
+        </TabsContent>
+
+        <TabsContent value="llm">
+          {canAi ? (
+            <LlmCredentialsTab />
+          ) : (
+            <p className="text-sm text-muted-foreground">{t('settings.noPermission')}</p>
+          )}
+        </TabsContent>
+
+        <TabsContent value="functions">
+          {canAi ? (
+            <AiFunctionsTab />
+          ) : (
+            <p className="text-sm text-muted-foreground">{t('settings.noPermission')}</p>
+          )}
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }

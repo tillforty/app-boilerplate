@@ -9,6 +9,7 @@ Demonstrates the full stack the boilerplate provides:
 The frontend CRM page (web/src/pages/CustomersPage.tsx) is wired to this router.
 Canonical DDL: migrations/0007_customers.sql.
 """
+import logging
 from datetime import date, datetime
 from enum import Enum
 
@@ -20,6 +21,8 @@ from pydantic import BaseModel, EmailStr, Field
 from . import db, llm, mailer, n8n, vectors
 from .auth import UserOut
 from .roles import require_permission
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/customers", tags=["customers"])
 
@@ -111,7 +114,11 @@ async def _store_embedding(customer_id: int, text: str) -> None:
             literal,
         )
     except Exception:  # noqa: BLE001 - embedding is an optional enhancement
-        pass
+        logger.warning(
+            "Failed to store embedding for customer %s; continuing without it",
+            customer_id,
+            exc_info=True,
+        )
 
 
 async def _notify_new_customer(customer: dict) -> None:
@@ -162,7 +169,9 @@ async def search_customers(
         if rows:
             return [_to_customer(r) for r in rows]
     except Exception:  # noqa: BLE001 - fall through to keyword search
-        pass
+        logger.warning(
+            "Vector search failed; falling back to keyword search", exc_info=True
+        )
 
     like = f"%{q}%"
     rows = await db.get_pool().fetch(

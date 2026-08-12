@@ -118,3 +118,18 @@ export interface SettingsPatch {
 
 export const updateSettings = (patch: SettingsPatch) =>
   api.patch<PublicSettings>('/settings', patch)
+
+/** Error-monitoring status for the Settings 'Error Monitoring' card. */
+export interface ObservabilityStatus {
+  /** DSN set → the app is sending errors to GlitchTip/Sentry. */
+  capture_configured: boolean
+  /** The bundled GlitchTip service is enabled (GLITCHTIP_ENABLED=true). */
+  bundled_glitchtip_enabled: boolean
+  /** Environment tag attached to events (production/staging/dev). */
+  environment: string
+  /** Where to browse captured errors (GlitchTip UI), if known. */
+  ui_url: string | null
+}
+
+export const getObservabilityStatus = () =>
+  api.get<ObservabilityStatus>('/settings/observability')

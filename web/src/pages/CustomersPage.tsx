@@ -1,12 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
-import { MoreHorizontal, Plus, Search, Pencil, Trash2 } from 'lucide-react'
+import { MoreHorizontal, Plus, Search, Pencil, Trash2, Users, SearchX } from 'lucide-react'
 import {
   listCustomers,
   createCustomer,
   updateCustomer,
   deleteCustomer,
   CUSTOMER_STATUSES,
-  STATUS_LABEL,
   STATUS_VARIANT,
   type Customer,
   type CustomerInput,
@@ -14,6 +13,8 @@ import {
 } from '@/lib/customers'
 import { ApiError } from '@/lib/api'
 import { formatMoney } from '@/lib/format'
+import { initials } from '@/lib/utils'
+import { useTranslation } from '@/i18n'
 import { useAppSettings } from '@/context/AppSettingsContext'
 import { PermissionGate } from '@/components/PermissionGate'
 import { DataLoadError } from '@/components/DataLoadError'
@@ -33,6 +34,8 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { TableEmptyState } from '@/components/ui/table-empty-state'
+import { useTabParam } from '@/lib/use-tab-param'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -56,8 +59,6 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 
-const initials = (name: string) =>
-  name.split(' ').map((p) => p[0]).slice(0, 2).join('').toUpperCase() || '?'
 const blankForm = (): CustomerInput => ({
   name: '',
   company: '',
@@ -68,12 +69,13 @@ const blankForm = (): CustomerInput => ({
 })
 
 export default function CustomersPage() {
+  const { t } = useTranslation()
   const { settings } = useAppSettings()
   const currencySymbol = settings?.currency_symbol ?? '€'
   const [rows, setRows] = useState<Customer[] | null>(null)
   const [loadError, setLoadError] = useState<unknown>(null)
   const [query, setQuery] = useState('')
-  const [tab, setTab] = useState<'all' | CustomerStatus>('all')
+  const [tab, setTab] = useTabParam<'all' | CustomerStatus>(['all', ...CUSTOMER_STATUSES], 'all')
 
   // edit/create dialog
   const [editorOpen, setEditorOpen] = useState(false)
@@ -159,7 +161,7 @@ export default function CustomersPage() {
       }
       setEditorOpen(false)
     } catch (e) {
-      setFormError(e instanceof ApiError ? e.message : 'Failed to save customer')
+      setFormError(e instanceof ApiError ? e.message : t('customers.saveFailed'))
     } finally {
       setSaving(false)
     }
@@ -173,7 +175,7 @@ export default function CustomersPage() {
       setRows((prev) => (prev ?? []).filter((c) => c.id !== deleteTarget.id))
       setDeleteTarget(null)
     } catch (e) {
-      setFormError(e instanceof ApiError ? e.message : 'Failed to delete customer')
+      setFormError(e instanceof ApiError ? e.message : t('customers.deleteFailed'))
     } finally {
       setDeleting(false)
     }
@@ -185,16 +187,15 @@ export default function CustomersPage() {
     <div className="mx-auto max-w-content space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold">Customers</h1>
+          <h1 className="text-2xl font-semibold">{t('customers.title')}</h1>
           <p className="text-sm text-muted-foreground">
-            A CRM-style example backed by the real <code>/customers</code> API — table, search,
-            filters, tabs and full CRUD with role-based access.
+            {t('customers.descriptionLead')} <code>/customers</code> {t('customers.descriptionTail')}
           </p>
         </div>
         <PermissionGate permission="customers:create">
           <Button onClick={openCreate} className="w-full sm:w-auto">
             <Plus className="mr-2 h-4 w-4" />
-            Add customer
+            {t('customers.add')}
           </Button>
         </PermissionGate>
       </div>
@@ -204,9 +205,9 @@ export default function CustomersPage() {
       {/* Summary stats */}
       <div className="grid gap-4 sm:grid-cols-3">
         {[
-          { label: 'Total customers', value: loading ? null : String(stats.total) },
-          { label: 'Active', value: loading ? null : String(stats.active) },
-          { label: 'Active MRR', value: loading ? null : formatMoney(stats.mrr, currencySymbol) },
+          { label: t('customers.statTotal'), value: loading ? null : String(stats.total) },
+          { label: t('customers.statActive'), value: loading ? null : String(stats.active) },
+          { label: t('customers.statMrr'), value: loading ? null : formatMoney(stats.mrr, currencySymbol) },
         ].map((s) => (
           <Card key={s.label}>
             <CardHeader className="pb-2">
@@ -228,7 +229,7 @@ export default function CustomersPage() {
         <div className="relative w-full sm:max-w-xs">
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="Search name, company, email…"
+            placeholder={t('customers.searchPlaceholder')}
             className="pl-8"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -240,10 +241,10 @@ export default function CustomersPage() {
           className="-mx-4 max-w-full overflow-x-auto px-4 sm:mx-0 sm:px-0"
         >
           <TabsList>
-            <TabsTrigger value="all">All</TabsTrigger>
+            <TabsTrigger value="all">{t('customers.all')}</TabsTrigger>
             {CUSTOMER_STATUSES.map((s) => (
               <TabsTrigger key={s} value={s}>
-                {STATUS_LABEL[s]}
+                {t(`customers.status.${s}`)}
               </TabsTrigger>
             ))}
           </TabsList>
@@ -255,11 +256,11 @@ export default function CustomersPage() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Customer</TableHead>
-              <TableHead>Email</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead className="text-right">MRR</TableHead>
-              <TableHead className="text-right">Seats</TableHead>
+              <TableHead>{t('customers.colCustomer')}</TableHead>
+              <TableHead>{t('customers.colEmail')}</TableHead>
+              <TableHead>{t('customers.colStatus')}</TableHead>
+              <TableHead className="text-right">{t('customers.colMrr')}</TableHead>
+              <TableHead className="text-right">{t('customers.colSeats')}</TableHead>
               <TableHead className="w-10" />
             </TableRow>
           </TableHeader>
@@ -284,13 +285,22 @@ export default function CustomersPage() {
                 </TableRow>
               ))
             ) : filtered.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">
-                  {(rows?.length ?? 0) === 0
-                    ? 'No customers yet. Add your first one.'
-                    : 'No customers match your filters.'}
-                </TableCell>
-              </TableRow>
+              (rows?.length ?? 0) === 0 ? (
+                <TableEmptyState
+                  colSpan={6}
+                  icon={Users}
+                  title={t('customers.emptyTitle')}
+                  description={t('customers.emptyDesc')}
+                />
+              ) : (
+                <TableEmptyState
+                  colSpan={6}
+                  variant="search"
+                  icon={SearchX}
+                  title={t('customers.emptySearchTitle')}
+                  description={t('customers.emptySearchDesc')}
+                />
+              )
             ) : (
               filtered.map((c) => (
                 <TableRow key={c.id}>
@@ -307,7 +317,7 @@ export default function CustomersPage() {
                   </TableCell>
                   <TableCell className="text-muted-foreground">{c.email}</TableCell>
                   <TableCell>
-                    <Badge variant={STATUS_VARIANT[c.status]}>{STATUS_LABEL[c.status]}</Badge>
+                    <Badge variant={STATUS_VARIANT[c.status]}>{t(`customers.status.${c.status}`)}</Badge>
                   </TableCell>
                   <TableCell className="text-right tabular-nums">{formatMoney(c.mrr, currencySymbol)}</TableCell>
                   <TableCell className="text-right tabular-nums">{c.seats}</TableCell>
@@ -316,7 +326,7 @@ export default function CustomersPage() {
                       <DropdownMenuTrigger asChild>
                         <Button variant="ghost" size="icon" className="h-8 w-8">
                           <MoreHorizontal className="h-4 w-4" />
-                          <span className="sr-only">Open menu</span>
+                          <span className="sr-only">{t('common.openMenu')}</span>
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
@@ -325,13 +335,13 @@ export default function CustomersPage() {
                           fallback={
                             <DropdownMenuItem disabled>
                               <Pencil className="mr-2 h-4 w-4" />
-                              Edit
+                              {t('common.edit')}
                             </DropdownMenuItem>
                           }
                         >
                           <DropdownMenuItem onClick={() => openEdit(c)}>
                             <Pencil className="mr-2 h-4 w-4" />
-                            Edit
+                            {t('common.edit')}
                           </DropdownMenuItem>
                         </PermissionGate>
                         <PermissionGate permission="customers:delete">
@@ -341,7 +351,7 @@ export default function CustomersPage() {
                             onClick={() => setDeleteTarget(c)}
                           >
                             <Trash2 className="mr-2 h-4 w-4" />
-                            Delete
+                            {t('common.delete')}
                           </DropdownMenuItem>
                         </PermissionGate>
                       </DropdownMenuContent>
@@ -355,7 +365,7 @@ export default function CustomersPage() {
       </div>
       {!loading && (
         <p className="text-xs text-muted-foreground">
-          Showing {filtered.length} of {rows?.length ?? 0} customers.
+          {t('customers.showing', { shown: filtered.length, total: rows?.length ?? 0 })}
         </p>
       )}
 
@@ -363,29 +373,29 @@ export default function CustomersPage() {
       <Dialog open={editorOpen} onOpenChange={setEditorOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{editingId !== null ? 'Edit customer' : 'Add customer'}</DialogTitle>
+            <DialogTitle>{editingId !== null ? t('customers.editTitle') : t('customers.add')}</DialogTitle>
             <DialogDescription>
-              {editingId !== null ? 'Update this customer’s details.' : 'Create a new customer record.'}
+              {editingId !== null ? t('customers.editDesc') : t('customers.createDesc')}
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-2">
             <div className="grid gap-2 sm:grid-cols-2">
               <div className="space-y-1.5">
-                <Label htmlFor="name">Name</Label>
+                <Label htmlFor="name">{t('customers.fieldName')}</Label>
                 <Input id="name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="company">Company</Label>
+                <Label htmlFor="company">{t('customers.fieldCompany')}</Label>
                 <Input id="company" value={form.company} onChange={(e) => setForm({ ...form, company: e.target.value })} />
               </div>
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="email">{t('customers.fieldEmail')}</Label>
               <Input id="email" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
             </div>
             <div className="grid gap-2 sm:grid-cols-3">
               <div className="space-y-1.5">
-                <Label htmlFor="status">Status</Label>
+                <Label htmlFor="status">{t('customers.fieldStatus')}</Label>
                 <Select
                   value={form.status}
                   onValueChange={(v) => setForm({ ...form, status: v as CustomerStatus })}
@@ -395,26 +405,26 @@ export default function CustomersPage() {
                   </SelectTrigger>
                   <SelectContent>
                     {CUSTOMER_STATUSES.map((s) => (
-                      <SelectItem key={s} value={s}>{STATUS_LABEL[s]}</SelectItem>
+                      <SelectItem key={s} value={s}>{t(`customers.status.${s}`)}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="mrr">MRR ({currencySymbol})</Label>
+                <Label htmlFor="mrr">{t('customers.fieldMrr', { symbol: currencySymbol })}</Label>
                 <Input id="mrr" type="number" min={0} value={form.mrr} onChange={(e) => setForm({ ...form, mrr: Number(e.target.value) })} />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="seats">Seats</Label>
+                <Label htmlFor="seats">{t('customers.fieldSeats')}</Label>
                 <Input id="seats" type="number" min={0} value={form.seats} onChange={(e) => setForm({ ...form, seats: Number(e.target.value) })} />
               </div>
             </div>
             {formError && <p className="text-sm text-destructive">{formError}</p>}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setEditorOpen(false)} disabled={saving}>Cancel</Button>
+            <Button variant="outline" onClick={() => setEditorOpen(false)} disabled={saving}>{t('common.cancel')}</Button>
             <Button onClick={save} disabled={saving || !form.name.trim() || !form.email.trim()}>
-              {saving ? 'Saving…' : editingId !== null ? 'Save changes' : 'Create'}
+              {saving ? t('common.saving') : editingId !== null ? t('customers.saveChanges') : t('common.create')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -424,16 +434,17 @@ export default function CustomersPage() {
       <Dialog open={deleteTarget !== null} onOpenChange={(o) => !o && setDeleteTarget(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete customer</DialogTitle>
+            <DialogTitle>{t('customers.deleteTitle')}</DialogTitle>
             <DialogDescription>
-              Delete <span className="font-medium text-foreground">{deleteTarget?.name}</span> from{' '}
-              {deleteTarget?.company}? This cannot be undone.
+              {t('customers.deleteConfirmLead')}{' '}
+              <span className="font-medium text-foreground">{deleteTarget?.name}</span>{' '}
+              {t('customers.deleteConfirmTail', { company: deleteTarget?.company ?? '' })}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteTarget(null)} disabled={deleting}>Cancel</Button>
+            <Button variant="outline" onClick={() => setDeleteTarget(null)} disabled={deleting}>{t('common.cancel')}</Button>
             <Button variant="destructive" onClick={confirmDelete} disabled={deleting}>
-              {deleting ? 'Deleting…' : 'Delete'}
+              {deleting ? t('common.deleting') : t('common.delete')}
             </Button>
           </DialogFooter>
         </DialogContent>

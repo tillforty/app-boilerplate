@@ -1,4 +1,4 @@
--- 0011_user_lifecycle.sql
+-- 0008_user_lifecycle.sql
 -- User lifecycle: active / pending (invited, not yet accepted) / inactive
 -- (deactivated/archived — kept for audit, cannot log in). Pending users are
 -- created by invitation and have no password until they accept via the public

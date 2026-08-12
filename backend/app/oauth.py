@@ -53,6 +53,13 @@ def _provider_config() -> dict[str, dict]:
 
     m_id = os.environ.get("MICROSOFT_CLIENT_ID")
     m_secret = os.environ.get("MICROSOFT_CLIENT_SECRET")
+    # SECURITY: the default 'common' tenant lets ANY Microsoft identity sign in,
+    # including arbitrary personal (consumer) accounts — not just users in your
+    # organization's directory. That means email ownership is only as trustworthy
+    # as the provider's email_verified claim, so the callback MUST gate on
+    # email_verified (see oauth_callback) before matching/creating a local user.
+    # Restrict MICROSOFT_TENANT_ID to your own tenant GUID to limit who can
+    # authenticate; left as 'common' by default for out-of-the-box SSO.
     m_tenant = os.environ.get("MICROSOFT_TENANT_ID", "common")
     if m_id and m_secret:
         cfg["microsoft"] = {
@@ -165,11 +172,24 @@ async def oauth_callback(
         info_res = await client.get(
             cfg["userinfo"], headers={"Authorization": f"Bearer {provider_token}"}
         )
+        if info_res.status_code != 200:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Failed to fetch user info from provider")
         userinfo = info_res.json()
 
     email = userinfo.get("email")
     if not email:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Provider did not return an email")
+    # SECURITY: only trust the provider-asserted email if the provider says it is
+    # verified. Without this, an attacker could register at the IdP with someone
+    # else's (unverified) email and take over that account here purely by matching
+    # on email — including auto-activating a pending invite. Google/OIDC return a
+    # boolean `email_verified`; Microsoft's userinfo may omit it, in which case we
+    # (safely) reject rather than trust an unverified address.
+    if userinfo.get("email_verified") is not True:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Provider did not assert a verified email; cannot sign in",
+        )
     name = userinfo.get("given_name") or userinfo.get("name") or email.split("@")[0]
     surname = userinfo.get("family_name") or ""
 

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Check, Copy, MoreHorizontal, Plus } from 'lucide-react'
+import { Check, Copy, MoreHorizontal, Plus, Users } from 'lucide-react'
 import {
   activateUser,
   createUser,
@@ -38,6 +38,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { useTabParam } from '@/lib/use-tab-param'
 import {
   Table,
   TableBody,
@@ -46,6 +47,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { TableEmptyState } from '@/components/ui/table-empty-state'
 import {
   Select,
   SelectContent,
@@ -74,7 +76,7 @@ export default function UsersPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
-  const [tab, setTab] = useState<UserStatus>('active')
+  const [tab, setTab] = useTabParam<UserStatus>(['active', 'pending', 'inactive'], 'active')
 
   const emptyForm = { name: '', surname: '', email: '', password: '', roleId: '' }
   const [createOpen, setCreateOpen] = useState(false)
@@ -238,6 +240,7 @@ export default function UsersPage() {
   const colSpan = 4 + (canManage ? 1 : 0) + (showKebab ? 1 : 0)
   const emptyText =
     tab === 'pending' ? t('users.emptyPending') : tab === 'inactive' ? t('users.emptyInactive') : t('users.empty')
+  const emptyHint = tab === 'active' ? t('users.emptyHint') : undefined
 
   const formValid =
     form.name.trim() &&
@@ -321,11 +324,7 @@ export default function UsersPage() {
                 </TableRow>
               ))
             ) : visible.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={colSpan} className="h-24 text-center text-muted-foreground">
-                  {emptyText}
-                </TableCell>
-              </TableRow>
+              <TableEmptyState colSpan={colSpan} icon={Users} title={emptyText} description={emptyHint} />
             ) : (
               visible.map((u) => (
                 <TableRow key={u.id}>
@@ -375,8 +374,9 @@ export default function UsersPage() {
                     <TableCell>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon" className="h-8 w-8">
+                          <Button variant="ghost" size="icon" className="h-8 w-8" aria-label={t('common.openMenu')}>
                             <MoreHorizontal className="h-4 w-4" />
+                            <span className="sr-only">{t('common.openMenu')}</span>
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
@@ -435,8 +435,10 @@ export default function UsersPage() {
                   size="icon"
                   className="shrink-0"
                   onClick={() => void copyUrl(inviteResult.url)}
+                  aria-label={t('users.copyInviteUrl')}
                 >
                   {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                  <span className="sr-only">{t('users.copyInviteUrl')}</span>
                 </Button>
               </div>
               <DialogFooter>

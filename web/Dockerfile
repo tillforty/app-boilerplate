@@ -5,6 +5,13 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
+# Sentry/GlitchTip config for the browser SDK. Vite inlines VITE_* from the
+# build environment into the static bundle, so these must be present at BUILD
+# time (passed as build args from docker-compose). Blank = SDK no-ops.
+ARG VITE_SENTRY_DSN=""
+ARG VITE_SENTRY_ENVIRONMENT="production"
+ENV VITE_SENTRY_DSN=$VITE_SENTRY_DSN \
+    VITE_SENTRY_ENVIRONMENT=$VITE_SENTRY_ENVIRONMENT
 RUN npm run build
 
 # Stage 2: serve

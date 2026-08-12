@@ -7,6 +7,9 @@ import {
   deleteFileById,
   type FileRecord,
 } from '@/lib/files'
+import { formatDate } from '@/lib/format'
+import { useTranslation } from '@/i18n'
+import { useAppSettings } from '@/context/AppSettingsContext'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -18,6 +21,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { TableEmptyState } from '@/components/ui/table-empty-state'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -40,20 +44,6 @@ const TYPE_ICON: Record<FileRecord['type'], React.ElementType> = {
   other: File,
 }
 
-const TYPE_LABEL: Record<FileRecord['type'], string> = {
-  document: 'Document',
-  image: 'Image',
-  other: 'Other',
-}
-
-function formatDate(iso: string) {
-  return new Date(iso).toLocaleDateString(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  })
-}
-
 function guessType(file: File): FileRecord['type'] {
   if (file.type.startsWith('image/')) return 'image'
   if (
@@ -66,6 +56,8 @@ function guessType(file: File): FileRecord['type'] {
 }
 
 export default function DocumentsPage() {
+  const { t } = useTranslation()
+  const { settings } = useAppSettings()
   const [rows, setRows] = useState<FileRecord[] | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -85,9 +77,9 @@ export default function DocumentsPage() {
     try {
       setRows(await listFiles())
     } catch {
-      setError('Failed to load documents.')
+      setError(t('documents.loadFailed'))
     }
-  }, [])
+  }, [t])
 
   useEffect(() => { load() }, [load])
 
@@ -100,7 +92,7 @@ export default function DocumentsPage() {
       const record = await uploadFile(file, guessType(file))
       setRows((prev) => (prev ? [record, ...prev] : [record]))
     } catch {
-      setError('Upload failed. Please try again.')
+      setError(t('documents.uploadFailed'))
     } finally {
       setUploading(false)
     }
@@ -111,7 +103,7 @@ export default function DocumentsPage() {
     try {
       await downloadFile(doc.id, doc.name)
     } catch {
-      setError('Download failed.')
+      setError(t('documents.downloadFailed'))
     } finally {
       setDownloading((s) => { const n = new Set(s); n.delete(doc.id); return n })
     }
@@ -125,7 +117,7 @@ export default function DocumentsPage() {
       setRows((prev) => (prev ?? []).filter((r) => r.id !== deleteTarget.id))
       setDeleteTarget(null)
     } catch {
-      setError('Delete failed.')
+      setError(t('documents.deleteFailed'))
     } finally {
       setDeleting(false)
     }
@@ -137,10 +129,14 @@ export default function DocumentsPage() {
     <div className="mx-auto max-w-content space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold">Documents</h1>
+          <h1 className="text-2xl font-semibold">{t('documents.title')}</h1>
           <p className="text-sm text-muted-foreground">
-            Upload, download, and manage files stored in{' '}
-            {import.meta.env.VITE_STORAGE_TYPE === 'backblaze' ? 'Backblaze B2' : 'local storage'}.
+            {t('documents.description', {
+              storage:
+                import.meta.env.VITE_STORAGE_TYPE === 'backblaze'
+                  ? 'Backblaze B2'
+                  : t('documents.storageLocal'),
+            })}
           </p>
         </div>
         <Button
@@ -149,7 +145,7 @@ export default function DocumentsPage() {
           className="w-full sm:w-auto"
         >
           <Plus className="mr-2 h-4 w-4" />
-          {uploading ? 'Uploading…' : 'Upload file'}
+          {uploading ? t('documents.uploading') : t('documents.upload')}
         </Button>
         <input
           ref={fileInputRef}
@@ -169,9 +165,9 @@ export default function DocumentsPage() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Name</TableHead>
-              <TableHead>Type</TableHead>
-              <TableHead>Uploaded</TableHead>
+              <TableHead>{t('documents.colName')}</TableHead>
+              <TableHead>{t('documents.colType')}</TableHead>
+              <TableHead>{t('documents.colUploaded')}</TableHead>
               <TableHead className="w-10" />
             </TableRow>
           </TableHeader>
@@ -191,11 +187,12 @@ export default function DocumentsPage() {
                 </TableRow>
               ))
             ) : rows.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={4} className="h-32 text-center text-muted-foreground">
-                  No documents yet. Upload your first file.
-                </TableCell>
-              </TableRow>
+              <TableEmptyState
+                colSpan={4}
+                icon={FileText}
+                title={t('documents.emptyTitle')}
+                description={t('documents.emptyDesc')}
+              />
             ) : (
               rows.map((doc) => {
                 const Icon = TYPE_ICON[doc.type]
@@ -208,17 +205,17 @@ export default function DocumentsPage() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <Badge variant="secondary">{TYPE_LABEL[doc.type]}</Badge>
+                      <Badge variant="secondary">{t(`documents.type.${doc.type}`)}</Badge>
                     </TableCell>
                     <TableCell className="text-muted-foreground">
-                      {formatDate(doc.created_at)}
+                      {formatDate(doc.created_at, settings?.timezone)}
                     </TableCell>
                     <TableCell>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <Button variant="ghost" size="icon" className="h-8 w-8">
                             <MoreHorizontal className="h-4 w-4" />
-                            <span className="sr-only">Open menu</span>
+                            <span className="sr-only">{t('common.openMenu')}</span>
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
@@ -227,7 +224,7 @@ export default function DocumentsPage() {
                             disabled={downloading.has(doc.id)}
                           >
                             <Download className="mr-2 h-4 w-4" />
-                            {downloading.has(doc.id) ? 'Downloading…' : 'Download'}
+                            {downloading.has(doc.id) ? t('documents.downloading') : t('documents.download')}
                           </DropdownMenuItem>
                           <DropdownMenuSeparator />
                           <DropdownMenuItem
@@ -235,7 +232,7 @@ export default function DocumentsPage() {
                             onClick={() => setDeleteTarget(doc)}
                           >
                             <Trash2 className="mr-2 h-4 w-4" />
-                            Delete
+                            {t('common.delete')}
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
@@ -249,25 +246,29 @@ export default function DocumentsPage() {
       </div>
 
       {!loading && rows.length > 0 && (
-        <p className="text-xs text-muted-foreground">{rows.length} file{rows.length !== 1 ? 's' : ''}</p>
+        <p className="text-xs text-muted-foreground">
+          {rows.length === 1
+            ? t('documents.fileCountOne', { count: rows.length })
+            : t('documents.fileCountOther', { count: rows.length })}
+        </p>
       )}
 
       <Dialog open={deleteTarget !== null} onOpenChange={(o) => !o && setDeleteTarget(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete document</DialogTitle>
+            <DialogTitle>{t('documents.deleteTitle')}</DialogTitle>
             <DialogDescription>
-              Permanently delete{' '}
-              <span className="font-medium text-foreground">{deleteTarget?.name}</span>? This
-              cannot be undone.
+              {t('documents.deleteConfirmLead')}{' '}
+              <span className="font-medium text-foreground">{deleteTarget?.name}</span>
+              {t('documents.deleteConfirmTail')}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDeleteTarget(null)} disabled={deleting}>
-              Cancel
+              {t('common.cancel')}
             </Button>
             <Button variant="destructive" onClick={confirmDelete} disabled={deleting}>
-              {deleting ? 'Deleting…' : 'Delete'}
+              {deleting ? t('common.deleting') : t('common.delete')}
             </Button>
           </DialogFooter>
         </DialogContent>

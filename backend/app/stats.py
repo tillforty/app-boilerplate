@@ -7,7 +7,8 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from . import db
-from .auth import UserOut, get_current_user
+from .auth import UserOut
+from .roles import require_permission
 
 router = APIRouter(prefix="/stats", tags=["stats"])
 
@@ -22,7 +23,7 @@ class Stats(BaseModel):
 
 
 @router.get("", response_model=Stats)
-async def get_stats(_: UserOut = Depends(get_current_user)) -> Stats:
+async def get_stats(_: UserOut = Depends(require_permission("customers:read"))) -> Stats:
     row = await db.get_pool().fetchrow(
         """
         SELECT

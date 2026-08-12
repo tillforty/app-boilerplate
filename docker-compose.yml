@@ -1,5 +1,23 @@
 name: tillforty-app
 
+# Shared config for every GlitchTip container (web/worker/migrate). Defined as a
+# top-level extension field (x-*, ignored by Compose) so the three services can
+# reference it via the *glitchtip-env anchor and stay in lockstep.
+x-glitchtip-env: &glitchtip-env
+  DATABASE_URL: postgres://${GLITCHTIP_POSTGRES_USER:-glitchtip}:${GLITCHTIP_POSTGRES_PASSWORD:-CHANGE_ME}@glitchtip_postgres:5432/${GLITCHTIP_POSTGRES_DB:-glitchtip}
+  REDIS_URL: redis://glitchtip_redis:6379/0
+  SECRET_KEY: ${GLITCHTIP_SECRET_KEY:-CHANGE_ME}
+  PORT: 8080
+  # Public URL where the GlitchTip UI is reachable (used in emails + DSN host).
+  GLITCHTIP_DOMAIN: ${GLITCHTIP_DOMAIN:-http://localhost:8090}
+  DEFAULT_FROM_EMAIL: ${GLITCHTIP_FROM_EMAIL:-glitchtip@localhost}
+  EMAIL_URL: ${GLITCHTIP_EMAIL_URL:-consolemail://}
+  # Open registration lets you create the first admin. Set false once you have
+  # your account, so the instance can't be signed up to by strangers.
+  ENABLE_OPEN_USER_REGISTRATION: ${GLITCHTIP_ENABLE_OPEN_USER_REGISTRATION:-true}
+  CELERY_WORKER_AUTOSCALE: "1,2"
+  CELERY_WORKER_MAX_TASKS_PER_CHILD: "10000"
+
 services:
   # ── Postgres (with pgvector + pgcrypto) ──────────────────────────────────
   postgres:
@@ -61,7 +79,15 @@ services:
 
   # ── React frontend (nginx serving the built SPA + /api proxy) ────────────
   web:
-    build: ./web
+    build:
+      context: ./web
+      # VITE_* values are baked into the static bundle at BUILD time (the SPA has
+      # no server runtime), so the browser-side Sentry DSN must be passed as a
+      # build arg. Changing SENTRY_DSN therefore requires a `web` image rebuild.
+      # Blank by default → the frontend SDK no-ops (see web/src/lib/observability.ts).
+      args:
+        VITE_SENTRY_DSN: ${VITE_SENTRY_DSN:-}
+        VITE_SENTRY_ENVIRONMENT: ${SENTRY_ENVIRONMENT:-production}
     restart: unless-stopped
     depends_on:
       api:
@@ -116,6 +142,82 @@ services:
     ports:
       - "${N8N_PORT:-5678}:5678"
 
+  # ── GlitchTip: self-hosted, Sentry-compatible error monitoring — OPTIONAL ─
+  # Only runs under the `glitchtip` profile (start.sh enables it when
+  # GLITCHTIP_ENABLED=true). Speaks the Sentry DSN + REST API, so the app's
+  # Sentry SDKs (backend/app/observability.py, web/src/lib/observability.ts)
+  # point straight at it. Own Postgres + Redis — never share the app DB.
+  # Footprint is ~1GB; leave disabled on small boxes.
+  glitchtip_postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    profiles: ["glitchtip"]
+    environment:
+      POSTGRES_USER: ${GLITCHTIP_POSTGRES_USER:-glitchtip}
+      POSTGRES_PASSWORD: ${GLITCHTIP_POSTGRES_PASSWORD:-CHANGE_ME}
+      POSTGRES_DB: ${GLITCHTIP_POSTGRES_DB:-glitchtip}
+    volumes:
+      - glitchtip_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${GLITCHTIP_POSTGRES_USER:-glitchtip} -d $${GLITCHTIP_POSTGRES_DB:-glitchtip}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  glitchtip_redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    profiles: ["glitchtip"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # One-shot: apply GlitchTip's DB schema, then exit (like the app `migrate`).
+  glitchtip_migrate:
+    image: glitchtip/glitchtip:v4.1
+    restart: "no"
+    profiles: ["glitchtip"]
+    command: ["./manage.py", "migrate"]
+    environment: *glitchtip-env
+    depends_on:
+      glitchtip_postgres:
+        condition: service_healthy
+
+  glitchtip:
+    image: glitchtip/glitchtip:v4.1
+    restart: unless-stopped
+    profiles: ["glitchtip"]
+    environment: *glitchtip-env
+    depends_on:
+      glitchtip_postgres:
+        condition: service_healthy
+      glitchtip_redis:
+        condition: service_healthy
+      glitchtip_migrate:
+        condition: service_completed_successfully
+    volumes:
+      - glitchtip_uploads:/code/uploads
+    ports:
+      - "${GLITCHTIP_PORT:-8090}:8080"
+
+  glitchtip_worker:
+    image: glitchtip/glitchtip:v4.1
+    restart: unless-stopped
+    profiles: ["glitchtip"]
+    command: ["./bin/run-celery-with-beat.sh"]
+    environment: *glitchtip-env
+    depends_on:
+      glitchtip_postgres:
+        condition: service_healthy
+      glitchtip_redis:
+        condition: service_healthy
+      glitchtip_migrate:
+        condition: service_completed_successfully
+    volumes:
+      - glitchtip_uploads:/code/uploads
+
   # ── Caddy reverse proxy (public HTTPS) — OPTIONAL ────────────────────────
   # Only runs when the `public` profile is active (start.sh enables it when
   # DOMAIN is set in .env). Terminates TLS with an automatic Let's Encrypt
@@ -141,5 +243,7 @@ volumes:
   storage:
   n8n_pgdata:
   n8n_data:
+  glitchtip_pgdata:
+  glitchtip_uploads:
   caddy_data:
   caddy_config:

@@ -228,6 +228,51 @@ use `VITE_N8N_BASE_URL` / `VITE_N8N_WEBHOOK_URL`.
 > **Note:** n8n's `N8N_ENCRYPTION_KEY` is auto-generated on first run. Rotating
 > it breaks all stored credentials in n8n — treat it like `VAULT_KEY`.
 
+### Error monitoring (self-hosted, Sentry-compatible)
+
+Error tracking is provided by **GlitchTip**, a lightweight, Sentry-DSN/API
+compatible tracker bundled as an optional service (its own Postgres + Redis +
+worker, ~1 GB RAM). The app's Sentry SDKs point straight at it:
+`sentry-sdk[fastapi]` on the backend (`backend/app/observability.py`) and
+`@sentry/react` on the frontend (`web/src/lib/observability.ts`).
+
+> Why not full self-hosted Sentry? Real Sentry needs ~40 containers and **16 GB
+> RAM minimum** — too heavy for a typical app box. GlitchTip gives you the same
+> DSN, the same REST API, and its own error-browsing UI at a fraction of the cost.
+
+**1. Enable it** (off by default, like n8n):
+
+```bash
+GLITCHTIP_ENABLED=true                 # bring up GlitchTip + its Postgres/Redis
+GLITCHTIP_PORT=8090                    # host port for the GlitchTip UI
+GLITCHTIP_DOMAIN=http://localhost:8090 # public URL (used in emails + DSN host)
+```
+
+Then `./start.sh` (or `./start.sh --profile glitchtip`). `start.sh` generates
+`GLITCHTIP_SECRET_KEY` + the DB password on first run.
+
+**2. Create a project and get the DSN.** Open the GlitchTip UI, register the
+first admin (open registration is on until you turn it off), create an
+organization + project, and copy the project **DSN**.
+
+**3. Wire the DSN and redeploy:**
+
+```bash
+SENTRY_DSN=<dsn>        # backend → may use the internal host http://glitchtip:8080/…
+VITE_SENTRY_DSN=<dsn>   # browser → must use the public GLITCHTIP_DOMAIN host
+SENTRY_ENVIRONMENT=production
+```
+
+Blank DSNs mean the SDKs **no-op** (identical to running without monitoring).
+`VITE_SENTRY_DSN` is baked into the SPA at build time, so changing it requires a
+`web` rebuild — `./start.sh` does that. Status and a link to the GlitchTip UI
+appear on the in-app **Settings → App settings** page (Error monitoring card).
+
+> **Pulling errors into the app's own UI:** GlitchTip exposes the Sentry REST API
+> (`/api/0/projects/{org}/{project}/issues/`). The `SENTRY_API_URL` / `SENTRY_API_TOKEN`
+> / `SENTRY_ORG_SLUG` / `SENTRY_PROJECT_SLUG` slots in `.env` are reserved for a
+> future embedded "Errors" page; the current integration is a status + link-out card.
+
 ### Backups
 
 ```bash

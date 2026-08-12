@@ -15,6 +15,7 @@ from enum import Enum
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile, status
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
@@ -80,17 +81,20 @@ class LocalStorage(StorageBackend):
         return full
 
     async def write(self, key: str, data: bytes) -> None:
+        # Disk I/O is blocking — run it off the event loop so concurrent requests
+        # aren't stalled. _resolve() validates the path synchronously (cheap).
+        path = self._resolve(key)
         self._base.mkdir(parents=True, exist_ok=True)
-        self._resolve(key).write_bytes(data)
+        await run_in_threadpool(path.write_bytes, data)
 
     async def read(self, key: str) -> bytes:
         path = self._resolve(key)
-        if not path.exists():
+        if not await run_in_threadpool(path.exists):
             raise HTTPException(status.HTTP_410_GONE, "Binary missing from storage")
-        return path.read_bytes()
+        return await run_in_threadpool(path.read_bytes)
 
     async def delete(self, key: str) -> None:
-        self._resolve(key).unlink(missing_ok=True)
+        await run_in_threadpool(self._resolve(key).unlink, missing_ok=True)
 
 
 class BackblazeStorage(StorageBackend):
@@ -113,17 +117,25 @@ class BackblazeStorage(StorageBackend):
         )
 
     async def write(self, key: str, data: bytes) -> None:
-        self._client.put_object(Bucket=self._bucket, Key=key, Body=data)
+        # boto3 is synchronous — run it in a threadpool so the S3 round-trip
+        # doesn't block the event loop.
+        await run_in_threadpool(
+            self._client.put_object, Bucket=self._bucket, Key=key, Body=data
+        )
 
     async def read(self, key: str) -> bytes:
         try:
-            resp = self._client.get_object(Bucket=self._bucket, Key=key)
-            return resp["Body"].read()
+            resp = await run_in_threadpool(
+                self._client.get_object, Bucket=self._bucket, Key=key
+            )
+            return await run_in_threadpool(resp["Body"].read)
         except Exception:
             raise HTTPException(status.HTTP_410_GONE, "Binary missing from storage")
 
     async def delete(self, key: str) -> None:
-        self._client.delete_object(Bucket=self._bucket, Key=key)
+        await run_in_threadpool(
+            self._client.delete_object, Bucket=self._bucket, Key=key
+        )
 
 
 _backend: StorageBackend | None = None

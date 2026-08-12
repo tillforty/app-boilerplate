@@ -9,6 +9,18 @@ export default defineConfig({
   resolve: {
     alias: { '@': path.resolve(__dirname, './src') },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        // Split large, rarely-changing deps into their own vendor chunks so
+        // they cache independently of app code and don't bloat the entry.
+        manualChunks: {
+          react: ['react', 'react-dom', 'react-router-dom'],
+          charts: ['recharts'],
+        },
+      },
+    },
+  },
   server: {
     host: true,
     port: 5173,

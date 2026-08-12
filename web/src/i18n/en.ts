@@ -11,13 +11,75 @@
  */
 export interface Dictionary {
   common: Record<
-    'save' | 'saving' | 'cancel' | 'delete' | 'edit' | 'create' | 'loading' | 'search' | 'confirm' | 'actions' | 'none',
+    'save' | 'saving' | 'cancel' | 'delete' | 'deleting' | 'edit' | 'create' | 'loading' | 'search' | 'confirm' | 'actions' | 'none' | 'openMenu',
     string
   >
   nav: Record<
-    'dashboard' | 'users' | 'roles' | 'settings' | 'navigation' | 'profile' | 'apiDocs' | 'signOut',
+    | 'dashboard' | 'customers' | 'documents' | 'components' | 'development' | 'users' | 'roles' | 'appSettings'
+    | 'settings' | 'navigation' | 'profile' | 'apiDocs' | 'signOut' | 'userMenu',
     string
   >
+  customers: {
+    title: string
+    descriptionLead: string
+    descriptionTail: string
+    add: string
+    statTotal: string
+    statActive: string
+    statMrr: string
+    searchPlaceholder: string
+    all: string
+    colCustomer: string
+    colEmail: string
+    colStatus: string
+    colMrr: string
+    colSeats: string
+    emptyTitle: string
+    emptyDesc: string
+    emptySearchTitle: string
+    emptySearchDesc: string
+    showing: string
+    editTitle: string
+    editDesc: string
+    createDesc: string
+    fieldName: string
+    fieldCompany: string
+    fieldEmail: string
+    fieldStatus: string
+    fieldMrr: string
+    fieldSeats: string
+    saveChanges: string
+    deleteTitle: string
+    deleteConfirmLead: string
+    deleteConfirmTail: string
+    saveFailed: string
+    deleteFailed: string
+    status: Record<'active' | 'trial' | 'churned' | 'lead', string>
+  }
+  documents: {
+    title: string
+    description: string
+    storageLocal: string
+    upload: string
+    uploading: string
+    colName: string
+    colType: string
+    colUploaded: string
+    emptyTitle: string
+    emptyDesc: string
+    download: string
+    downloading: string
+    fileCountOne: string
+    fileCountOther: string
+    deleteTitle: string
+    deleteConfirmLead: string
+    deleteConfirmTail: string
+    loadFailed: string
+    uploadFailed: string
+    downloadFailed: string
+    deleteFailed: string
+    type: Record<'document' | 'image' | 'other', string>
+  }
   auth: Record<
     | 'title' | 'email' | 'password' | 'signIn' | 'signingIn' | 'invalidCredentials'
     | 'continueWith' | 'signInWith' | 'completing' | 'missingToken' | 'callbackFailed'
@@ -29,11 +91,11 @@ export interface Dictionary {
     | 'permissions' | 'name' | 'description' | 'namePlaceholder' | 'descPlaceholder' | 'dialogHint'
     | 'adminLocked' | 'deleteConfirm' | 'loadFailed' | 'saveFailed' | 'deleteFailed'
     | 'edit' | 'status' | 'active' | 'inactive' | 'deactivate' | 'activate'
-    | 'deactivateConfirm' | 'actionFailed' | 'empty',
+    | 'deactivateConfirm' | 'actionFailed' | 'empty' | 'emptyHint',
     string
   >
   users: Record<
-    | 'colUser' | 'colEmail' | 'colRole' | 'colJoined' | 'colActions' | 'assignRole' | 'empty'
+    | 'colUser' | 'colEmail' | 'colRole' | 'colJoined' | 'colActions' | 'assignRole' | 'empty' | 'emptyHint'
     | 'newUser' | 'createTitle' | 'createHint' | 'firstName' | 'lastName' | 'email' | 'password'
     | 'role' | 'createFailed'
     | 'tabActive' | 'tabPending' | 'tabInactive' | 'emptyPending' | 'emptyInactive'
@@ -59,7 +121,32 @@ export interface Dictionary {
     string
   >
   settings: Record<
-    | 'title' | 'subtitle' | 'save' | 'saved' | 'loadFailed' | 'saveFailed' | 'noPermission',
+    | 'title' | 'subtitle' | 'save' | 'saved' | 'loadFailed' | 'saveFailed' | 'noPermission'
+    | 'tabGeneral' | 'tabLlm' | 'tabFunctions',
+    string
+  >
+  llm: Record<
+    | 'subtitle' | 'addConnection' | 'editConnection' | 'dialogDesc' | 'loadFailed' | 'saveFailed'
+    | 'deleteConfirm' | 'emptyTitle' | 'emptyDesc' | 'keySet' | 'keyUnset' | 'noDefaultModel'
+    | 'test' | 'testing' | 'testOk' | 'testFail' | 'provider' | 'label' | 'labelPlaceholder'
+    | 'defaultModel' | 'modelPlaceholder' | 'baseUrl' | 'apiKey' | 'apiKeyPlaceholder'
+    | 'apiKeyKeep' | 'apiKeyHint' | 'functionsSubtitle' | 'functionsNoCreds' | 'connection'
+    | 'connectionNone' | 'noEligibleCreds' | 'model' | 'modelDefaultPlaceholder' | 'saved',
+    string
+  >
+  observability: Record<
+    | 'title' | 'subtitle' | 'active' | 'inactive' | 'inactiveHint'
+    | 'environment' | 'open' | 'noUi',
+    string
+  >
+  development: Record<
+    | 'title' | 'subtitle' | 'tabAgent' | 'tabIssues' | 'tabSupport'
+    | 'comingSoon' | 'comingSoonHint' | 'noPermission'
+    | 'issuesEmpty' | 'issuesError' | 'refresh'
+    | 'colIssue' | 'colLevel' | 'colEvents' | 'colUsers' | 'colLastSeen' | 'open'
+    | 'setupTitle' | 'setupIntro' | 'openGlitchtip' | 'redeployNote'
+    | 'step1Title' | 'step1Desc' | 'step2Title' | 'step2Desc'
+    | 'step3Title' | 'step3Desc' | 'step4Title' | 'step4Desc',
     string
   >
 }
@@ -70,6 +157,7 @@ export const en: Dictionary = {
     saving: 'Saving…',
     cancel: 'Cancel',
     delete: 'Delete',
+    deleting: 'Deleting…',
     edit: 'Edit',
     create: 'Create',
     loading: 'Loading…',
@@ -77,16 +165,94 @@ export const en: Dictionary = {
     confirm: 'Confirm',
     actions: 'Actions',
     none: '—',
+    openMenu: 'Open menu',
   },
   nav: {
     dashboard: 'Dashboard',
+    customers: 'Customers',
+    documents: 'Documents',
+    components: 'Components',
+    development: 'Development',
     users: 'Users',
     roles: 'Roles',
+    appSettings: 'App settings',
     settings: 'Settings',
     navigation: 'Navigation',
     profile: 'Profile',
     apiDocs: 'API Docs',
     signOut: 'Sign out',
+    userMenu: 'User menu',
+  },
+  customers: {
+    title: 'Customers',
+    descriptionLead: 'A CRM-style example backed by the real',
+    descriptionTail:
+      'API — table, search, filters, tabs and full CRUD with role-based access.',
+    add: 'Add customer',
+    statTotal: 'Total customers',
+    statActive: 'Active',
+    statMrr: 'Active MRR',
+    searchPlaceholder: 'Search name, company, email…',
+    all: 'All',
+    colCustomer: 'Customer',
+    colEmail: 'Email',
+    colStatus: 'Status',
+    colMrr: 'MRR',
+    colSeats: 'Seats',
+    emptyTitle: 'No customers yet',
+    emptyDesc: 'Add your first customer to start tracking accounts, MRR, and seats.',
+    emptySearchTitle: 'No customers match your filters',
+    emptySearchDesc: 'Try a different search term or switch the status filter.',
+    showing: 'Showing {shown} of {total} customers.',
+    editTitle: 'Edit customer',
+    editDesc: 'Update this customer’s details.',
+    createDesc: 'Create a new customer record.',
+    fieldName: 'Name',
+    fieldCompany: 'Company',
+    fieldEmail: 'Email',
+    fieldStatus: 'Status',
+    fieldMrr: 'MRR ({symbol})',
+    fieldSeats: 'Seats',
+    saveChanges: 'Save changes',
+    deleteTitle: 'Delete customer',
+    deleteConfirmLead: 'Delete',
+    deleteConfirmTail: 'from {company}? This cannot be undone.',
+    saveFailed: 'Failed to save customer',
+    deleteFailed: 'Failed to delete customer',
+    status: {
+      active: 'Active',
+      trial: 'Trial',
+      churned: 'Churned',
+      lead: 'Lead',
+    },
+  },
+  documents: {
+    title: 'Documents',
+    description: 'Upload, download, and manage files stored in {storage}.',
+    storageLocal: 'local storage',
+    upload: 'Upload file',
+    uploading: 'Uploading…',
+    colName: 'Name',
+    colType: 'Type',
+    colUploaded: 'Uploaded',
+    emptyTitle: 'No documents yet',
+    emptyDesc: 'Upload your first file to keep documents in one place.',
+    download: 'Download',
+    downloading: 'Downloading…',
+    fileCountOne: '{count} file',
+    fileCountOther: '{count} files',
+    deleteTitle: 'Delete document',
+    deleteConfirmLead: 'Permanently delete',
+    deleteConfirmTail: '? This cannot be undone.',
+    loadFailed: 'Failed to load documents.',
+    uploadFailed: 'Upload failed. Please try again.',
+    downloadFailed: 'Download failed.',
+    deleteFailed: 'Delete failed.',
+    type: {
+      document: 'Document',
+      image: 'Image',
+      other: 'Other',
+    },
   },
   auth: {
     title: 'Sign in to your account',
@@ -134,7 +300,8 @@ export const en: Dictionary = {
     deactivateConfirm:
       'Deactivate role "{name}"? Users who have it keep it, but it won\'t be offered for new assignments.',
     actionFailed: 'Action failed',
-    empty: 'No roles yet.',
+    empty: 'No roles yet',
+    emptyHint: 'Create a role to control what each user is allowed to do.',
   },
   users: {
     colUser: 'User',
@@ -143,7 +310,8 @@ export const en: Dictionary = {
     colJoined: 'Joined',
     colActions: 'Role',
     assignRole: 'Assign role',
-    empty: 'No users yet.',
+    empty: 'No users yet',
+    emptyHint: 'Invite your first teammate to get started.',
     newUser: 'New user',
     createTitle: 'Create user',
     createHint: 'The user signs in with this email and password. You can change their role later.',
@@ -156,8 +324,8 @@ export const en: Dictionary = {
     tabActive: 'Active',
     tabPending: 'Pending',
     tabInactive: 'Inactive',
-    emptyPending: 'No pending invitations.',
-    emptyInactive: 'No inactive users.',
+    emptyPending: 'No pending invitations',
+    emptyInactive: 'No inactive users',
     modeInvite: 'Invite by email',
     modePassword: 'Set password now',
     inviteHint:
@@ -237,5 +405,89 @@ export const en: Dictionary = {
     loadFailed: 'Failed to load settings',
     saveFailed: 'Failed to save settings',
     noPermission: 'You don’t have permission to edit app settings.',
+    tabGeneral: 'General',
+    tabLlm: 'LLM credentials',
+    tabFunctions: 'AI functions',
+  },
+  llm: {
+    subtitle: 'Provider connections. API keys are stored encrypted and never shown again.',
+    addConnection: 'Add connection',
+    editConnection: 'Edit connection',
+    dialogDesc: 'Choose a provider, a default model, and paste an API key.',
+    loadFailed: 'Failed to load LLM configuration',
+    saveFailed: 'Failed to save',
+    deleteConfirm: 'Delete the connection “{label}”? Functions using it will be unbound.',
+    emptyTitle: 'No connections yet',
+    emptyDesc: 'Add an OpenAI or Claude connection to power AI functions.',
+    keySet: 'Key set',
+    keyUnset: 'No key',
+    noDefaultModel: 'No default model',
+    test: 'Test',
+    testing: 'Testing…',
+    testOk: 'Connection OK',
+    testFail: 'Connection failed',
+    provider: 'Provider',
+    label: 'Name',
+    labelPlaceholder: 'e.g. OpenAI (production)',
+    defaultModel: 'Default model',
+    modelPlaceholder: 'e.g. gpt-4o or claude-opus-4-8',
+    baseUrl: 'Base URL (optional)',
+    apiKey: 'API key',
+    apiKeyPlaceholder: 'Paste the provider API key',
+    apiKeyKeep: 'Leave blank to keep the current key',
+    apiKeyHint: 'Stored encrypted in the server vault; never returned to the browser.',
+    functionsSubtitle: 'Pick which connection and model each AI feature uses.',
+    functionsNoCreds: 'Add a connection in the LLM credentials tab first.',
+    connection: 'Connection',
+    connectionNone: 'Not configured',
+    noEligibleCreds: 'No connection supports “{capability}”. Add a compatible provider.',
+    model: 'Model',
+    modelDefaultPlaceholder: 'Uses the connection’s default model',
+    saved: 'Saved',
+  },
+  observability: {
+    title: 'Error monitoring',
+    subtitle: 'Self-hosted, Sentry-compatible error tracking (GlitchTip).',
+    active: 'Capturing errors',
+    inactive: 'Not configured',
+    inactiveHint:
+      'Enable GlitchTip and set a project DSN in .env (SENTRY_DSN / VITE_SENTRY_DSN), then redeploy.',
+    environment: 'Environment',
+    open: 'Open GlitchTip',
+    noUi: 'Dashboard URL not configured.',
+  },
+  development: {
+    title: 'Development',
+    subtitle: 'Internal tools and diagnostics.',
+    tabAgent: 'Agent',
+    tabIssues: 'Issues',
+    tabSupport: 'Support',
+    comingSoon: 'Coming soon',
+    comingSoonHint: 'This tool is on the way.',
+    noPermission: 'You don’t have permission to view this.',
+    issuesEmpty: 'No open issues. 🎉',
+    issuesError: 'Failed to load issues',
+    refresh: 'Refresh',
+    colIssue: 'Issue',
+    colLevel: 'Level',
+    colEvents: 'Events',
+    colUsers: 'Users',
+    colLastSeen: 'Last seen',
+    open: 'Open',
+    setupTitle: 'Set up live error tracking',
+    setupIntro: 'Complete these steps to see errors here live:',
+    openGlitchtip: 'Open GlitchTip',
+    redeployNote: 'After editing .env, redeploy with ./start.sh.',
+    step1Title: 'Enable the error tracker',
+    step1Desc: 'Set GLITCHTIP_ENABLED=true in .env and run ./start.sh to bring up GlitchTip.',
+    step2Title: 'Create a project and wire the DSN',
+    step2Desc:
+      'In GlitchTip: create an organization + project, copy the DSN, and set SENTRY_DSN and VITE_SENTRY_DSN in .env.',
+    step3Title: 'Create an API auth token',
+    step3Desc:
+      'In GlitchTip: Profile → Auth Tokens → create a token, then set SENTRY_API_TOKEN in .env.',
+    step4Title: 'Set the org and project slugs',
+    step4Desc:
+      'Set SENTRY_ORG_SLUG and SENTRY_PROJECT_SLUG in .env (from the project’s URL/settings), then redeploy.',
   },
 }

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useTabParam } from '@/lib/use-tab-param'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -19,6 +20,10 @@ import { DEMO_ACTIVITY, FAQ } from '@/lib/demo-data'
 
 export default function ComponentsPage() {
   const [agree, setAgree] = useState(true)
+  const [demoTab, setDemoTab] = useTabParam<'overview' | 'activity' | 'settings'>(
+    ['overview', 'activity', 'settings'],
+    'overview',
+  )
 
   return (
     <div className="mx-auto max-w-content space-y-6">
@@ -36,7 +41,7 @@ export default function ComponentsPage() {
           <CardDescription>Switch between related views.</CardDescription>
         </CardHeader>
         <CardContent>
-          <Tabs defaultValue="overview">
+          <Tabs value={demoTab} onValueChange={(v) => setDemoTab(v as typeof demoTab)}>
             <TabsList>
               <TabsTrigger value="overview">Overview</TabsTrigger>
               <TabsTrigger value="activity">Activity</TabsTrigger>

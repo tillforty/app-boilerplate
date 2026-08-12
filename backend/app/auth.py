@@ -12,11 +12,12 @@ from datetime import datetime, timedelta, timezone
 
 import asyncpg
 import jwt
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 
 from . import db, mailer, security
+from .ratelimit import limiter
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 _bearer = HTTPBearer(auto_error=False)
@@ -70,7 +71,7 @@ class LoginResponse(BaseModel):
 class ProfileUpdate(BaseModel):
     name: str | None = None
     surname: str | None = None
-    email: str | None = None
+    email: EmailStr | None = None
 
 
 class PasswordChange(BaseModel):
@@ -81,7 +82,7 @@ class PasswordChange(BaseModel):
 class UserCreate(BaseModel):
     name: str
     surname: str
-    email: str
+    email: EmailStr
     password: str
     role_id: int | None = None  # defaults to the 'member' role when omitted
 
@@ -89,7 +90,7 @@ class UserCreate(BaseModel):
 class InviteCreate(BaseModel):
     name: str
     surname: str
-    email: str
+    email: EmailStr
     role_id: int | None = None  # defaults to the 'member' role when omitted
 
 
@@ -141,7 +142,7 @@ async def ensure_schema_and_seed() -> None:
     pool = db.get_pool()
     async with pool.acquire() as conn:
         await conn.execute(CREATE_USERS_TABLE)
-        # Lifecycle columns (canonical DDL in migrations/0011_user_lifecycle.sql);
+        # Lifecycle columns (canonical DDL in migrations/0008_user_lifecycle.sql);
         # idempotent so pre-migration databases self-heal on startup.
         await conn.execute("ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL")
         await conn.execute(
@@ -172,12 +173,15 @@ async def get_current_user(
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Not authenticated")
     try:
         payload = security.decode_token(creds.credentials)
-    except jwt.PyJWTError:
+        user_id = int(payload["sub"])
+    except (jwt.PyJWTError, KeyError, TypeError, ValueError):
+        # Bad signature/expiry, or a token with a missing/non-numeric `sub` — all
+        # map to 401 rather than surfacing a 500 from int()/KeyError.
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid or expired token")
 
     row = await db.get_pool().fetchrow(
         "SELECT id, name, surname, email, status FROM users WHERE id = $1",
-        int(payload["sub"]),
+        user_id,
     )
     if row is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "User not found")
@@ -224,7 +228,8 @@ def _set_auth_cookie(response: Response, token: str) -> None:
 
 
 @router.post("/login", response_model=LoginResponse)
-async def login(body: LoginRequest, response: Response) -> LoginResponse:
+@limiter.limit("5/minute")
+async def login(request: Request, body: LoginRequest, response: Response) -> LoginResponse:
     row = await db.get_pool().fetchrow(
         "SELECT id, name, surname, email, password_hash, status FROM users WHERE email = $1",
         body.email,
@@ -436,7 +441,10 @@ async def get_invite(token: str) -> InviteInfo:
 
 
 @router.post("/invite/{token}/accept", response_model=LoginResponse)
-async def accept_invite(token: str, body: InviteAccept, response: Response) -> LoginResponse:
+@limiter.limit("10/minute")
+async def accept_invite(
+    request: Request, token: str, body: InviteAccept, response: Response
+) -> LoginResponse:
     """Public: set the password, activate the account, and log the user in."""
     if len(body.password) < 8:
         raise HTTPException(

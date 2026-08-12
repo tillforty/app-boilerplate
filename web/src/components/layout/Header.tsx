@@ -18,7 +18,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet'
-import { cn } from '@/lib/utils'
+import { cn, initials } from '@/lib/utils'
 import { appConfig, type NavItem } from '@/config/app-config'
 import { useAppSettings } from '@/context/AppSettingsContext'
 import { useTranslation } from '@/i18n'
@@ -42,9 +42,7 @@ export default function Header() {
   }, [location.pathname])
 
   const fullName = user ? `${user.name} ${user.surname}`.trim() : 'User'
-  const initials = user
-    ? `${user.name.charAt(0)}${user.surname.charAt(0)}`.toUpperCase()
-    : 'U'
+  const userInitials = user ? initials(fullName) : 'U'
 
   function handleSignOut() {
     logout()
@@ -61,26 +59,26 @@ export default function Header() {
       'flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors',
       isActive(item.href)
         ? 'bg-primary text-primary-foreground'
-        : 'text-gray-700 hover:bg-muted',
+        : 'text-foreground hover:bg-muted',
     )
     if (item.external) {
       return (
         <a href={item.href} target="_blank" rel="noopener noreferrer" className={className}>
           <Icon className="h-5 w-5 shrink-0" />
-          {item.label}
+          {t(item.labelKey)}
         </a>
       )
     }
     return (
       <Link to={item.href} className={className}>
         <Icon className="h-5 w-5 shrink-0" />
-        {item.label}
+        {t(item.labelKey)}
       </Link>
     )
   }
 
   return (
-    <header className="grid h-14 grid-cols-[auto_1fr_auto] items-center gap-2 border-b bg-white px-3 sm:gap-3 sm:px-4 md:gap-6 md:px-6">
+    <header className="grid h-14 grid-cols-[auto_1fr_auto] items-center gap-2 border-b border-border bg-background px-3 sm:gap-3 sm:px-4 md:gap-6 md:px-6">
       {/* Left: mobile menu trigger + logo */}
       <div className="flex items-center gap-2">
         <Button
@@ -90,7 +88,7 @@ export default function Header() {
           aria-label={t('nav.navigation')}
           onClick={() => setMobileOpen(true)}
         >
-          <Menu className="h-5 w-5 text-gray-600" />
+          <Menu className="h-5 w-5 text-muted-foreground" />
         </Button>
         <Link to="/" className="flex items-center shrink-0">
           <img src={logoSrc} alt={appName} className="h-5" />
@@ -107,10 +105,10 @@ export default function Header() {
               'px-3 py-1.5 rounded-md text-sm font-medium transition-colors',
               isActive(item.href)
                 ? 'bg-primary text-primary-foreground'
-                : 'text-gray-600 hover:bg-primary hover:text-primary-foreground',
+                : 'text-muted-foreground hover:bg-primary hover:text-primary-foreground',
             )}
           >
-            {item.label}
+            {t(item.labelKey)}
           </Link>
         ))}
       </nav>
@@ -123,7 +121,7 @@ export default function Header() {
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="icon" aria-label={t('nav.settings')}>
-              <Settings className="h-5 w-5 text-gray-500" />
+              <Settings className="h-5 w-5 text-muted-foreground" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-48">
@@ -139,7 +137,7 @@ export default function Header() {
                   }
                 >
                   <Icon className="mr-2 h-4 w-4" />
-                  {item.label}
+                  {t(item.labelKey)}
                 </DropdownMenuItem>
               )
             })}
@@ -149,13 +147,13 @@ export default function Header() {
         {/* User dropdown */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" className="flex items-center gap-2 px-2 rounded-full" aria-label="User menu">
+            <Button variant="ghost" className="flex items-center gap-2 px-2 rounded-full" aria-label={t('nav.userMenu')}>
               <Avatar className="h-8 w-8">
                 <AvatarFallback className="bg-primary text-primary-foreground text-xs font-medium">
-                  {initials}
+                  {userInitials}
                 </AvatarFallback>
               </Avatar>
-              <ChevronDown className="hidden h-3 w-3 text-gray-500 sm:block" />
+              <ChevronDown className="hidden h-3 w-3 text-muted-foreground sm:block" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-56">

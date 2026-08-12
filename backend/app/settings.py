@@ -23,14 +23,16 @@ from fastapi import (
     File,
     Form,
     HTTPException,
+    Request,
     Response,
     UploadFile,
     status,
 )
 from pydantic import BaseModel
 
-from . import db, mailer, security
+from . import db, mailer, observability, security
 from .auth import UserOut
+from .ratelimit import limiter
 from .roles import ADMIN_ROLE, require_permission
 
 router = APIRouter(prefix="/settings", tags=["settings"])
@@ -253,6 +255,24 @@ async def get_admin_settings(
     )
 
 
+class ObservabilityStatus(BaseModel):
+    """Error-monitoring status for the admin Settings 'Error Monitoring' card.
+    Env-derived only (no secrets) — the DSN itself is never returned."""
+
+    capture_configured: bool
+    bundled_glitchtip_enabled: bool
+    environment: str
+    ui_url: str | None
+
+
+@router.get("/observability", response_model=ObservabilityStatus)
+async def get_observability(
+    _: UserOut = Depends(require_permission("roles:manage")),
+) -> ObservabilityStatus:
+    """Whether error capture is configured, and where to browse the errors."""
+    return ObservabilityStatus(**observability.status())
+
+
 @router.post("/logo", status_code=status.HTTP_204_NO_CONTENT)
 async def set_logo(
     logo: UploadFile = File(...),
@@ -273,7 +293,9 @@ async def set_logo(
 
 
 @router.post("/onboard", status_code=status.HTTP_204_NO_CONTENT)
+@limiter.limit("10/minute")
 async def onboard(
+    request: Request,
     app_name: str = Form(...),
     default_language: str = Form("en"),
     currency_code: str = Form("EUR"),
@@ -317,12 +339,13 @@ async def onboard(
             )
 
     async with pool.acquire() as conn:
-        already = await conn.fetchval("SELECT onboarded FROM app_settings WHERE id = 1")
-        if already:
-            raise HTTPException(status.HTTP_409_CONFLICT, "Already onboarded")
-
         async with conn.transaction():
-            await conn.execute(
+            # Atomic first-run guard: flip onboarded false→true in the same
+            # statement that writes the settings, so concurrent first-run requests
+            # race on the row and only one wins. The previous read-then-write let
+            # both requests pass the SELECT and onboard twice. A 0-row result means
+            # someone already onboarded → 409 (rolls back this transaction).
+            result = await conn.execute(
                 """
                 UPDATE app_settings SET
                     app_name = $1, default_language = $2, currency_code = $3,
@@ -330,13 +353,17 @@ async def onboard(
                     from_name = $7, from_email = $8, support_email = $9,
                     logo = COALESCE($10, logo), logo_mime = COALESCE($11, logo_mime),
                     onboarded = true, updated_at = now()
-                WHERE id = 1
+                WHERE id = 1 AND onboarded = false
                 """,
                 app_name.strip(), default_language, currency_code.strip(),
                 currency_symbol.strip(), timezone, demo_mode,
                 from_name.strip(), from_email.strip(), support_email.strip(),
                 logo_bytes, logo_mime,
             )
+            # asyncpg returns a command tag like "UPDATE 1"; 0 rows updated means
+            # the guard (onboarded = false) no longer held.
+            if result.split()[-1] == "0":
+                raise HTTPException(status.HTTP_409_CONFLICT, "Already onboarded")
 
             # Upsert the administrator: claim the existing seeded admin in place,
             # or create one if none exists.

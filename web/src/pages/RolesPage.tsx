@@ -28,6 +28,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { TableEmptyState } from '@/components/ui/table-empty-state'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -210,11 +211,12 @@ export default function RolesPage() {
                 </TableCell>
               </TableRow>
             ) : roles.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={colSpan} className="h-24 text-center text-muted-foreground">
-                  {t('roles.empty')}
-                </TableCell>
-              </TableRow>
+              <TableEmptyState
+                colSpan={colSpan}
+                icon={ShieldCheck}
+                title={t('roles.empty')}
+                description={t('roles.emptyHint')}
+              />
             ) : (
               roles.map((role) => (
                 <TableRow key={role.id} className={role.is_active ? undefined : 'opacity-60'}>
@@ -257,8 +259,9 @@ export default function RolesPage() {
                     <TableCell>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon" className="h-8 w-8">
+                          <Button variant="ghost" size="icon" className="h-8 w-8" aria-label={t('common.openMenu')}>
                             <MoreHorizontal className="h-4 w-4" />
+                            <span className="sr-only">{t('common.openMenu')}</span>
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
