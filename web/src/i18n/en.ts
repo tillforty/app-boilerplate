@@ -142,7 +142,7 @@ export interface Dictionary {
   development: Record<
     | 'title' | 'subtitle' | 'tabAgent' | 'tabIssues' | 'tabSupport'
     | 'comingSoon' | 'comingSoonHint' | 'noPermission'
-    | 'issuesEmpty' | 'issuesEmptyTitle' | 'issuesCount' | 'issuesError' | 'refresh'
+    | 'issuesEmpty' | 'issuesEmptyTitle' | 'issuesError' | 'refresh'
     | 'colIssue' | 'colLevel' | 'colEvents' | 'colUsers' | 'colLastSeen' | 'colActions' | 'open'
     | 'setupTitle' | 'setupIntro' | 'openGlitchtip' | 'redeployNote'
     | 'step1Title' | 'step1Desc' | 'step2Title' | 'step2Desc'
@@ -467,7 +467,6 @@ export const en: Dictionary = {
     noPermission: 'You don’t have permission to view this.',
     issuesEmpty: 'Errors captured from the app will show up here.',
     issuesEmptyTitle: 'No open issues',
-    issuesCount: '{count} open issue(s)',
     issuesError: 'Failed to load issues',
     refresh: 'Refresh',
     colIssue: 'Issue',

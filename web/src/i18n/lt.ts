@@ -320,7 +320,6 @@ export const lt: Dictionary = {
     noPermission: 'Neturite teisės to peržiūrėti.',
     issuesEmpty: 'Iš programos užfiksuotos klaidos bus rodomos čia.',
     issuesEmptyTitle: 'Neišspręstų klaidų nėra',
-    issuesCount: 'Neišspręstų klaidų: {count}',
     issuesError: 'Nepavyko įkelti klaidų',
     refresh: 'Atnaujinti',
     colIssue: 'Klaida',

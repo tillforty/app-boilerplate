@@ -117,10 +117,7 @@ function IssuesList({ issues, onRefresh }: { issues: Issue[]; onRefresh: () => v
   const { t } = useTranslation()
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">
-          {t('development.issuesCount', { count: String(issues.length) })}
-        </p>
+      <div className="flex items-center justify-end">
         <Button type="button" variant="outline" size="sm" onClick={onRefresh}>
           <RefreshCw className="mr-2 h-4 w-4" />
           {t('development.refresh')}
@@ -188,11 +185,49 @@ function IssuesList({ issues, onRefresh }: { issues: Issue[]; onRefresh: () => v
   )
 }
 
-/** Issues tab: permission gate → setup checklist → live list. */
-function IssuesTab() {
+/** Issues tab body: permission gate → setup checklist → live list.
+ *  Presentational — data is fetched by DevelopmentPage so the tab count is
+ *  available even while the Issues tab isn't the active one. */
+function IssuesTab({
+  canView,
+  loading,
+  error,
+  setup,
+  issues,
+  onRefresh,
+}: {
+  canView: boolean
+  loading: boolean
+  error: string | null
+  setup: DevSetupStatus | null
+  issues: Issue[] | null
+  onRefresh: () => void
+}) {
+  const { t } = useTranslation()
+  if (!canView) {
+    return <p className="text-sm text-muted-foreground">{t('development.noPermission')}</p>
+  }
+  if (loading) {
+    return <p className="text-sm text-muted-foreground">{t('common.loading')}</p>
+  }
+  if (error) {
+    return (
+      <div className="rounded-md border border-destructive/50 bg-destructive/10 px-4 py-2 text-sm text-destructive">
+        {error}
+      </div>
+    )
+  }
+  if (setup && !setup.api_configured) {
+    return <SetupChecklist setup={setup} />
+  }
+  return <IssuesList issues={issues ?? []} onRefresh={onRefresh} />
+}
+
+export default function DevelopmentPage() {
   const { t } = useTranslation()
   const { can } = usePermissions()
   const canView = can('roles:manage')
+  const [tab, setTab] = useTabParam<Tab>(TABS, 'issues')
 
   const [setup, setSetup] = useState<DevSetupStatus | null>(null)
   const [issues, setIssues] = useState<Issue[] | null>(null)
@@ -230,28 +265,8 @@ function IssuesTab() {
     }
   }, [canView, reloadKey, t])
 
-  if (!canView) {
-    return <p className="text-sm text-muted-foreground">{t('development.noPermission')}</p>
-  }
-  if (loading) {
-    return <p className="text-sm text-muted-foreground">{t('common.loading')}</p>
-  }
-  if (error) {
-    return (
-      <div className="rounded-md border border-destructive/50 bg-destructive/10 px-4 py-2 text-sm text-destructive">
-        {error}
-      </div>
-    )
-  }
-  if (setup && !setup.api_configured) {
-    return <SetupChecklist setup={setup} />
-  }
-  return <IssuesList issues={issues ?? []} onRefresh={() => setReloadKey((k) => k + 1)} />
-}
-
-export default function DevelopmentPage() {
-  const { t } = useTranslation()
-  const [tab, setTab] = useTabParam<Tab>(TABS, 'issues')
+  // Tab badges. Agent/Support are placeholders (no data yet) → 0.
+  const issuesBadge = issues !== null ? String(issues.length) : ''
 
   return (
     <div className="mx-auto max-w-content space-y-6">
@@ -262,15 +277,25 @@ export default function DevelopmentPage() {
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)}>
         <TabsList>
-          <TabsTrigger value="agent">{t('development.tabAgent')}</TabsTrigger>
-          <TabsTrigger value="issues">{t('development.tabIssues')}</TabsTrigger>
-          <TabsTrigger value="support">{t('development.tabSupport')}</TabsTrigger>
+          <TabsTrigger value="agent">{t('development.tabAgent')} (0)</TabsTrigger>
+          <TabsTrigger value="issues">
+            {t('development.tabIssues')}
+            {issuesBadge !== '' && ` (${issuesBadge})`}
+          </TabsTrigger>
+          <TabsTrigger value="support">{t('development.tabSupport')} (0)</TabsTrigger>
         </TabsList>
         <TabsContent value="agent">
           <ComingSoon />
         </TabsContent>
         <TabsContent value="issues">
-          <IssuesTab />
+          <IssuesTab
+            canView={canView}
+            loading={loading}
+            error={error}
+            setup={setup}
+            issues={issues}
+            onRefresh={() => setReloadKey((k) => k + 1)}
+          />
         </TabsContent>
         <TabsContent value="support">
           <ComingSoon />
