@@ -5,11 +5,13 @@ import { usePermissions } from '@/context/PermissionsContext'
 import { useTranslation } from '@/i18n'
 import {
   getDevSetup,
+  getIssue,
   listIssues,
   resolveIssue,
   createJobFromIssue,
   type DevSetupStatus,
   type Issue,
+  type IssueDetail,
 } from '@/lib/development'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -30,6 +32,14 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import AgentTab from '@/components/development/AgentTab'
 
 const TABS = ['agent', 'issues', 'support'] as const
@@ -126,10 +136,12 @@ function IssuesList({
   issues,
   onRefresh,
   uiUrl,
+  onOpen,
 }: {
   issues: Issue[]
   onRefresh: () => void
   uiUrl: string | null
+  onOpen: (id: string) => void
 }) {
   const { t } = useTranslation()
   const [creatingJobId, setCreatingJobId] = useState<string | null>(null)
@@ -203,7 +215,13 @@ function IssuesList({
               issues.map((it) => (
                 <TableRow key={it.id}>
                   <TableCell className="max-w-md">
-                    <div className="truncate font-medium">{it.title}</div>
+                    <button
+                      type="button"
+                      className="block max-w-full truncate text-left font-medium hover:underline"
+                      onClick={() => onOpen(it.id)}
+                    >
+                      {it.title}
+                    </button>
                     {it.culprit && (
                       <div className="truncate text-xs text-muted-foreground">{it.culprit}</div>
                     )}
@@ -252,7 +270,7 @@ function IssuesList({
                           {it.web_url && (
                             <DropdownMenuItem
                               onClick={() =>
-                                window.open(it.web_url, '_blank', 'noopener,noreferrer')
+                                window.open(it.web_url!, '_blank', 'noopener,noreferrer')
                               }
                             >
                               {t('development.open')}
@@ -291,6 +309,18 @@ function IssuesTab({
   onRefresh: () => void
 }) {
   const { t } = useTranslation()
+  const [detail, setDetail] = useState<IssueDetail | null>(null)
+  const [detailError, setDetailError] = useState<string | null>(null)
+
+  function openIssue(id: string) {
+    setDetailError(null)
+    void getIssue(id)
+      .then(setDetail)
+      .catch((e) =>
+        setDetailError(e instanceof Error ? e.message : t('development.issueLoadFailed')),
+      )
+  }
+
   if (!canView) {
     return <p className="text-sm text-muted-foreground">{t('development.noPermission')}</p>
   }
@@ -307,7 +337,131 @@ function IssuesTab({
   if (setup && !setup.api_configured) {
     return <SetupChecklist setup={setup} />
   }
-  return <IssuesList issues={issues ?? []} onRefresh={onRefresh} uiUrl={setup?.ui_url ?? null} />
+  return (
+    <>
+      {detailError && (
+        <div className="mb-3 rounded-md border border-destructive/50 bg-destructive/10 px-4 py-2 text-sm text-destructive">
+          {detailError}
+        </div>
+      )}
+      <IssuesList
+        issues={issues ?? []}
+        onRefresh={onRefresh}
+        uiUrl={setup?.ui_url ?? null}
+        onOpen={openIssue}
+      />
+      <IssueDetailDialog detail={detail} onClose={() => setDetail(null)} />
+    </>
+  )
+}
+
+/** The stack trace, in-app. The whole point is that debugging a production error
+ *  shouldn't require a second account on the error tracker. */
+function IssueDetailDialog({
+  detail,
+  onClose,
+}: {
+  detail: IssueDetail | null
+  onClose: () => void
+}) {
+  const { t } = useTranslation()
+  return (
+    <Dialog open={detail !== null} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-3xl">
+        <DialogHeader>
+          <DialogTitle className="break-words">{detail?.title}</DialogTitle>
+          <DialogDescription>
+            {detail &&
+              [
+                detail.short_id,
+                detail.level,
+                detail.platform,
+                t('development.issueSeen', { count: detail.count, users: detail.user_count }),
+              ]
+                .filter(Boolean)
+                .join(' · ')}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="max-h-[60vh] space-y-4 overflow-y-auto">
+          {detail?.exception_value && (
+            <div className="space-y-1">
+              <p className="text-xs font-medium text-muted-foreground">
+                {detail.exception_type ?? t('development.issueException')}
+              </p>
+              <p className="whitespace-pre-line break-words rounded-md border bg-muted/40 px-3 py-2 text-sm">
+                {detail.exception_value}
+              </p>
+            </div>
+          )}
+          <div className="space-y-1">
+            <p className="text-xs font-medium text-muted-foreground">
+              {t('development.issueStack')}
+            </p>
+            {detail?.frames.length ? (
+              // Innermost frame last is Python's order; reverse so the throw site
+              // is the first thing read.
+              <ul className="space-y-2">
+                {[...detail.frames].reverse().map((f, i) => (
+                  <li key={i} className="rounded-md border bg-muted/40 p-2 text-xs">
+                    <div className="flex flex-wrap items-baseline gap-x-2">
+                      <span className="font-medium">{f.function ?? '—'}</span>
+                      <span className="break-all text-muted-foreground">
+                        {f.filename ?? f.module ?? ''}
+                        {f.line_no !== null ? `:${f.line_no}` : ''}
+                      </span>
+                      {f.in_app && (
+                        <Badge variant="secondary" className="text-[10px]">
+                          {t('development.issueInApp')}
+                        </Badge>
+                      )}
+                    </div>
+                    {f.context.length > 0 && (
+                      <pre className="mt-1 overflow-x-auto whitespace-pre text-[11px] leading-relaxed">
+                        {f.context
+                          .map((c) => `${String(c.line_no ?? '').padStart(5)}  ${c.text}`)
+                          .join('\n')}
+                      </pre>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-sm text-muted-foreground">{t('development.issueNoStack')}</p>
+            )}
+          </div>
+          {detail && detail.tags.length > 0 && (
+            <div className="space-y-1">
+              <p className="text-xs font-medium text-muted-foreground">
+                {t('development.issueTags')}
+              </p>
+              <div className="flex flex-wrap gap-1">
+                {detail.tags.map((tag) => (
+                  <Badge key={tag.key} variant="outline" className="font-normal">
+                    {tag.key}: {tag.value}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+        <DialogFooter>
+          {detail?.web_url && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => window.open(detail.web_url!, '_blank', 'noopener,noreferrer')}
+            >
+              {t('development.open')}
+              <ExternalLink className="ml-2 h-4 w-4" />
+            </Button>
+          )}
+          <Button type="button" onClick={onClose}>
+            {t('agent.close')}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
 }
 
 export default function DevelopmentPage() {

@@ -32,6 +32,34 @@ export interface IssueList {
   issues: Issue[]
 }
 
+export interface SourceLine {
+  line_no: number | null
+  text: string
+}
+
+export interface Frame {
+  filename: string | null
+  function: string | null
+  module: string | null
+  line_no: number | null
+  in_app: boolean
+  context: SourceLine[]
+}
+
+/** An issue plus its latest event — the stack trace included, so debugging
+ *  doesn't mean a second login to the tracker's own UI. */
+export interface IssueDetail extends Issue {
+  exception_type: string | null
+  exception_value: string | null
+  platform: string | null
+  event_id: string | null
+  event_created: string | null
+  frames: Frame[]
+  tags: { key: string; value: string }[]
+}
+
+export const getIssue = (id: string) => api.get<IssueDetail>(`/development/issues/${id}`)
+
 export const getDevSetup = () => api.get<DevSetupStatus>('/development/setup')
 
 export const listIssues = (query?: string, limit = 50) => {

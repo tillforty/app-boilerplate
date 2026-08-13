@@ -48,6 +48,38 @@ class IssueList(BaseModel):
     issues: list[Issue]
 
 
+class SourceLine(BaseModel):
+    line_no: int | None = None
+    text: str = ""
+
+
+class Frame(BaseModel):
+    filename: str | None = None
+    function: str | None = None
+    module: str | None = None
+    line_no: int | None = None
+    in_app: bool = False
+    context: list[SourceLine] = []
+
+
+class IssueTag(BaseModel):
+    key: str
+    value: str
+
+
+class IssueDetail(Issue):
+    """An issue plus its latest event — enough to debug in-app instead of
+    bouncing to the tracker's own UI. Frame locals are deliberately not carried."""
+
+    exception_type: str | None = None
+    exception_value: str | None = None
+    platform: str | None = None
+    event_id: str | None = None
+    event_created: str | None = None
+    frames: list[Frame] = []
+    tags: list[IssueTag] = []
+
+
 @router.get("/setup", response_model=DevSetupStatus)
 async def get_setup(
     _: UserOut = Depends(require_permission("roles:manage")),
@@ -107,6 +139,34 @@ async def resolve_issue(
             status.HTTP_502_BAD_GATEWAY,
             f"Could not reach the error tracker: {exc}",
         ) from exc
+
+
+@router.get("/issues/{issue_id}", response_model=IssueDetail)
+async def get_issue(
+    issue_id: str,
+    _: UserOut = Depends(require_permission("roles:manage")),
+) -> IssueDetail:
+    """One issue with its latest stack trace. Same failure contract as the list."""
+    if not observability.api_configured():
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Error-tracker API is not configured. See Development › Issues setup.",
+        )
+    try:
+        issue = await observability.fetch_issue(issue_id)
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 404:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Issue not found") from exc
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            f"Error tracker returned {exc.response.status_code}. Check the API token and slugs.",
+        ) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            f"Could not reach the error tracker: {exc}",
+        ) from exc
+    return IssueDetail(**issue)
 
 
 @router.post("/issues/{issue_id}/job", response_model=devagent.Job, status_code=status.HTTP_201_CREATED)

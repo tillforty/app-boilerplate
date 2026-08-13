@@ -146,6 +146,8 @@ export interface Dictionary {
     | 'colIssue' | 'colLevel' | 'colEvents' | 'colUsers' | 'colFirstSeen' | 'colLastSeen' | 'colActions' | 'open'
     | 'prepareJob' | 'resolve' | 'resolving' | 'creating' | 'firstSeen'
     | 'setupTitle' | 'setupIntro' | 'openGlitchtip' | 'redeployNote'
+    | 'issueLoadFailed' | 'issueSeen' | 'issueException' | 'issueStack'
+    | 'issueNoStack' | 'issueInApp' | 'issueTags'
     | 'step1Title' | 'step1Desc' | 'step2Title' | 'step2Desc'
     | 'step3Title' | 'step3Desc' | 'step4Title' | 'step4Desc',
     string
@@ -526,6 +528,13 @@ export const en: Dictionary = {
     resolving: 'Resolving...',
     creating: 'Creating...',
     firstSeen: 'First seen',
+    issueLoadFailed: 'Could not load the issue',
+    issueSeen: '{count} events · {users} users',
+    issueException: 'Exception',
+    issueStack: 'Stack trace',
+    issueNoStack: 'No stack trace was stored for the latest event.',
+    issueInApp: 'app',
+    issueTags: 'Tags',
     setupTitle: 'Set up live error tracking',
     setupIntro: 'Complete these steps to see errors here live:',
     openGlitchtip: 'Open GlitchTip',

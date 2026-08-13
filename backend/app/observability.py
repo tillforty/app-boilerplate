@@ -128,6 +128,99 @@ def _issue_web_url(issue_id: str, permalink: str | None) -> str | None:
     return permalink
 
 
+def _frames(event: dict) -> tuple[str | None, str | None, list[dict]]:
+    """Exception type, message and stack frames from an event's `entries`.
+
+    GlitchTip mirrors Sentry's shape: entries[] carries an `exception` entry
+    whose values[] each hold a stacktrace. Take the last value — the exception
+    that was raised rather than whatever it was raised *from* — and normalize to
+    snake_case. `vars` is dropped deliberately: frame locals are exactly where
+    secrets turn up in a traceback.
+    """
+    entry = next((e for e in event.get("entries") or [] if e.get("type") == "exception"), None)
+    values = ((entry or {}).get("data") or {}).get("values") or []
+    if not values:
+        return None, None, []
+    value = values[-1]
+    frames = []
+    for f in (value.get("stacktrace") or {}).get("frames") or []:
+        frames.append(
+            {
+                "filename": f.get("filename") or f.get("absPath"),
+                "function": f.get("function"),
+                "module": f.get("module"),
+                "line_no": f.get("lineNo"),
+                "in_app": bool(f.get("inApp")),
+                # `context` is a list of [lineNo, text] pairs around the frame.
+                "context": [
+                    {"line_no": c[0], "text": str(c[1])}
+                    for c in (f.get("context") or [])
+                    if isinstance(c, (list, tuple)) and len(c) >= 2
+                ],
+            }
+        )
+    return value.get("type"), value.get("value"), frames
+
+
+async def fetch_issue(issue_id: str) -> dict:
+    """One issue plus its latest event, so the app can show a stack trace without
+    sending anyone to the tracker's own UI — and its own separate login.
+
+    Same contract as fetch_issues: RuntimeError when unconfigured, httpx errors
+    propagate to the router.
+    """
+    if not api_configured():
+        raise RuntimeError("Issue API is not configured (token/org/project slug missing).")
+
+    import httpx
+
+    base = _api_base()
+    headers = {"Authorization": f"Bearer {SENTRY_API_TOKEN}"}
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.get(f"{base}/api/0/issues/{issue_id}/", headers=headers)
+        resp.raise_for_status()
+        issue = resp.json()
+        # The latest event is a second fetch and may legitimately be missing
+        # (retention, or an issue with no stored event); that isn't an error.
+        event: dict = {}
+        try:
+            ev = await client.get(
+                f"{base}/api/0/issues/{issue_id}/events/latest/", headers=headers
+            )
+            if ev.status_code == 200:
+                event = ev.json()
+        except httpx.HTTPError:
+            event = {}
+
+    exc_type, exc_value, frames = _frames(event)
+    meta = issue.get("metadata") or {}
+    issue_id_str = str(issue.get("id", issue_id))
+    return {
+        "id": issue_id_str,
+        "short_id": issue.get("shortId"),
+        "title": issue.get("title") or issue.get("culprit") or "(untitled)",
+        "culprit": issue.get("culprit"),
+        "level": issue.get("level"),
+        "status": issue.get("status"),
+        "count": int(issue.get("count") or 0),
+        "user_count": int(issue.get("userCount") or 0),
+        "first_seen": issue.get("firstSeen"),
+        "last_seen": issue.get("lastSeen"),
+        "web_url": _issue_web_url(issue_id_str, issue.get("permalink")),
+        "exception_type": exc_type or meta.get("type"),
+        "exception_value": exc_value or meta.get("value"),
+        "platform": event.get("platform"),
+        "event_id": event.get("eventID"),
+        "event_created": event.get("dateCreated"),
+        "frames": frames,
+        "tags": [
+            {"key": str(t.get("key")), "value": str(t.get("value"))}
+            for t in (event.get("tags") or [])
+            if t.get("key")
+        ],
+    }
+
+
 async def fetch_issues(query: str | None = None, limit: int = 50) -> list[dict]:
     """List issues from the Sentry-compatible REST API (GlitchTip). Returns a
     normalized, secret-free subset. Raises RuntimeError when unconfigured and
@@ -169,41 +262,6 @@ async def fetch_issues(query: str | None = None, limit: int = 50) -> list[dict]:
             }
         )
     return issues
-
-
-async def fetch_issue(issue_id: str) -> dict:
-    """Fetch a single issue by ID from the Sentry-compatible REST API (GlitchTip).
-    Returns a normalized, secret-free subset. Raises when unconfigured or when
-    the API call fails."""
-    if not api_configured():
-        raise RuntimeError("Issue API is not configured (token/org/project slug missing).")
-
-    import httpx
-
-    base = _api_base()
-    url = f"{base}/api/0/projects/{SENTRY_ORG_SLUG}/{SENTRY_PROJECT_SLUG}/issues/{issue_id}/"
-
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        resp = await client.get(
-            url,
-            headers={"Authorization": f"Bearer {SENTRY_API_TOKEN}"},
-        )
-        resp.raise_for_status()
-        it = resp.json()
-
-    return {
-        "id": issue_id,
-        "short_id": it.get("shortId"),
-        "title": it.get("title") or it.get("culprit") or "(untitled)",
-        "culprit": it.get("culprit"),
-        "level": it.get("level"),
-        "status": it.get("status"),
-        "count": int(it.get("count") or 0),
-        "user_count": int(it.get("userCount") or 0),
-        "first_seen": it.get("firstSeen"),
-        "last_seen": it.get("lastSeen"),
-        "web_url": _issue_web_url(issue_id, it.get("permalink")),
-    }
 
 
 async def resolve_issue(issue_id: str) -> None:
