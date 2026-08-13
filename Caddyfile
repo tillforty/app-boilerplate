@@ -22,9 +22,25 @@
 	reverse_proxy web:80
 }
 
-# NOTE: GlitchTip is reached via its published port (http://DOMAIN:GLITCHTIP_PORT),
-# not through Caddy — so there is intentionally no GlitchTip site block here. To
-# instead expose it on a dedicated TLS subdomain, add a block like the one above
-# with reverse_proxy glitchtip:8080 and set GLITCHTIP_PUBLIC_DOMAIN + its DNS.
-# (Don't template it off an env var that may be empty — an empty address makes
-# Caddy read the block as keyless global config and refuse to start.)
+# GlitchTip over TLS on a second port of the SAME hostname. A dedicated
+# subdomain would need its own DNS record, which not every install can add; the
+# certificate Caddy already holds for {$DOMAIN} covers this as-is, because a
+# certificate is bound to the name and not to the port.
+#
+# Why this matters beyond tidiness: the browser SDK posts to VITE_SENTRY_DSN, and
+# an http:// DSN from an https:// page is mixed active content that browsers
+# block outright — so frontend error capture silently never arrives. Serving
+# GlitchTip over TLS is what fixes that.
+#
+# Keep GLITCHTIP_PUBLIC_DOMAIN (.env) in step with this address, since it is the
+# DSN host, the email-link host, and the CSRF origin all at once.
+#
+# {$DOMAIN} is always set when this file is used — the `public` profile that
+# runs Caddy is only enabled when DOMAIN is present — and even unset it would
+# degrade to `:8443` (a valid address, just without TLS) rather than the keyless
+# block that would stop Caddy booting.
+{$DOMAIN}:8443 {
+	{$CADDY_TLS}
+	encode gzip
+	reverse_proxy glitchtip:8080
+}
