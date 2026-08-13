@@ -9,7 +9,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 
-from . import observability
+from . import devagent, observability
 from .auth import UserOut
 from .roles import require_permission
 
@@ -82,3 +82,107 @@ async def get_issues(
             f"Could not reach the error tracker: {exc}",
         ) from exc
     return IssueList(configured=True, issues=[Issue(**i) for i in issues])
+
+
+@router.post("/issues/{issue_id}/resolve", status_code=status.HTTP_204_NO_CONTENT)
+async def resolve_issue(
+    issue_id: str,
+    _: UserOut = Depends(require_permission("roles:manage")),
+) -> None:
+    """Resolve an issue in GlitchTip."""
+    try:
+        await observability.resolve_issue(issue_id)
+    except RuntimeError as e:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            str(e),
+        ) from e
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            f"Error tracker returned {exc.response.status_code}.",
+        ) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            f"Could not reach the error tracker: {exc}",
+        ) from exc
+
+
+@router.post("/issues/{issue_id}/job", response_model=devagent.Job, status_code=status.HTTP_201_CREATED)
+async def create_job_from_issue(
+    issue_id: str,
+    user: UserOut = Depends(require_permission("development:run")),
+) -> devagent.Job:
+    """Create a job to fix an issue. The issue is resolved when the job succeeds."""
+    try:
+        issue_data = await observability.fetch_issue(issue_id)
+    except RuntimeError as e:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            str(e),
+        ) from e
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            f"Error tracker returned {exc.response.status_code}.",
+        ) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            f"Could not reach the error tracker: {exc}",
+        ) from exc
+
+    # Create a prompt from the issue data
+    title = issue_data.get("title", "Untitled issue")
+    culprit = issue_data.get("culprit", "")
+    level = issue_data.get("level", "error")
+    prompt = f"Fix this error: {title}"
+    if culprit:
+        prompt += f" in {culprit}"
+
+    # Create the job with the issue_id linked
+    from fastapi import Form
+
+    # We can't use Form() directly here since we're calling the job creation logic directly
+    # Instead, import the internal function that handles job creation
+    config = await devagent._config_row()
+    if not config["repo_full_name"] or not config["has_token"]:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "No repository configured. Set it in Settings › App › Development.",
+        )
+    agent = await devagent.resolve_agent()
+    if not agent.configured:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "No coding agent selected. Bind the 'Development agent' function to a "
+            "Claude (Anthropic) or OpenAI connection in Settings › App › AI functions.",
+        )
+
+    title_generated = await devagent.generate_title(prompt)
+    from . import db
+
+    async with db.get_pool().acquire() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                """
+                INSERT INTO dev_jobs (title, prompt, agent, model, status, created_by, issue_id)
+                VALUES ($1, $2, $3, $4, 'pending', $5, $6)
+                RETURNING *
+                """,
+                title_generated,
+                prompt,
+                agent.agent,
+                agent.model,
+                user.id,
+                issue_id,
+            )
+            queued = f"Queued for {agent.label}. Created from issue {issue_id}."
+            await conn.execute(
+                "INSERT INTO dev_job_events (job_id, kind, message) VALUES ($1, 'queued', $2)",
+                row["id"],
+                queued,
+            )
+    full = await db.get_pool().fetchrow(f"{devagent._JOB_SELECT} WHERE j.id = $1", row["id"])
+    return await devagent._job_out(full)

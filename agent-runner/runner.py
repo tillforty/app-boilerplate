@@ -195,6 +195,31 @@ async def gh_put(token: str, path: str, body: dict) -> httpx.Response:
         return await c.put(f"{GITHUB_API}{path}", headers=gh_headers(token), json=body)
 
 
+async def resolve_issue_via_sentry(issue_id: str) -> None:
+    """Resolve an issue in Sentry/GlitchTip via its REST API."""
+    org_slug = os.environ.get("SENTRY_ORG_SLUG", "").strip()
+    project_slug = os.environ.get("SENTRY_PROJECT_SLUG", "").strip()
+    api_token = os.environ.get("SENTRY_API_TOKEN", "").strip()
+    api_url = os.environ.get("SENTRY_API_URL", "").strip().rstrip("/")
+
+    if not api_url:
+        api_url = "http://glitchtip:8080"
+
+    if not (org_slug and project_slug and api_token):
+        log(f"Cannot resolve issue {issue_id}: Sentry API not configured")
+        return
+
+    url = f"{api_url}/api/0/projects/{org_slug}/{project_slug}/issues/{issue_id}/"
+    async with httpx.AsyncClient(timeout=15) as c:
+        resp = await c.put(
+            url,
+            json={"status": "resolved"},
+            headers={"Authorization": f"Bearer {api_token}"},
+        )
+        resp.raise_for_status()
+        log(f"Auto-resolved issue {issue_id}")
+
+
 # ── DB helpers ───────────────────────────────────────────────────────────────
 async def get_secret(pool, name: str) -> str | None:
     return await pool.fetchval(
@@ -1080,6 +1105,19 @@ async def finish_release(pool, rel_id: int, ok: bool, error: str | None = None,
                     """,
                     rel_id,
                 )
+                # Auto-resolve issues for deployed jobs that have an issue_id
+                jobs_with_issues = await conn.fetch(
+                    """
+                    SELECT id, issue_id FROM dev_jobs
+                    WHERE release_id = $1 AND issue_id IS NOT NULL
+                    """,
+                    rel_id,
+                )
+                for job in jobs_with_issues:
+                    try:
+                        await resolve_issue_via_sentry(job["issue_id"])
+                    except Exception as e:
+                        log(f"Failed to auto-resolve issue {job['issue_id']}: {e}")
             else:
                 # A failed release puts its jobs back in the queue rather than
                 # stranding them in 'deploying' — they are still merged.

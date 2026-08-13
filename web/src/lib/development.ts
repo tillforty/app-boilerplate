@@ -41,6 +41,12 @@ export const listIssues = (query?: string, limit = 50) => {
   return api.get<IssueList>(`/development/issues?${params.toString()}`)
 }
 
+export const resolveIssue = (issueId: string) =>
+  api.post<void>(`/development/issues/${issueId}/resolve`, {})
+
+export const createJobFromIssue = (issueId: string) =>
+  api.post<Job>(`/development/issues/${issueId}/job`, {})
+
 // ── Development agent ───────────────────────────────────────────────────────
 
 /** Job lifecycle. `answer_pending` and `deployment_ready` are the two states

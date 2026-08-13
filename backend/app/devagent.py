@@ -198,7 +198,9 @@ async def ensure_schema() -> None:
             ALTER TABLE dev_jobs ADD COLUMN IF NOT EXISTS input_tokens bigint NOT NULL DEFAULT 0;
             ALTER TABLE dev_jobs ADD COLUMN IF NOT EXISTS output_tokens bigint NOT NULL DEFAULT 0;
             ALTER TABLE dev_jobs ADD COLUMN IF NOT EXISTS cache_read_tokens bigint NOT NULL DEFAULT 0;
+            ALTER TABLE dev_jobs ADD COLUMN IF NOT EXISTS issue_id text;
             CREATE INDEX IF NOT EXISTS dev_jobs_release_idx ON dev_jobs (release_id);
+            CREATE INDEX IF NOT EXISTS dev_jobs_issue_idx ON dev_jobs (issue_id);
             ALTER TABLE dev_deployments ADD COLUMN IF NOT EXISTS release_number integer;
             ALTER TABLE dev_deployments ADD COLUMN IF NOT EXISTS job_count integer NOT NULL DEFAULT 0;
             """
@@ -588,6 +590,7 @@ class Job(BaseModel):
     files: list[JobFile] = []
     merged_at: datetime | None = None
     release_id: int | None = None
+    issue_id: str | None = None
     # What the run cost. merge_cost_usd is the part of cost_usd spent resolving
     # conflicts, so never add the two together.
     cost_usd: float = 0
@@ -628,6 +631,7 @@ def _to_job(row, files: list[JobFile]) -> Job:
         files=files,
         merged_at=row["merged_at"],
         release_id=row["release_id"],
+        issue_id=row.get("issue_id"),
         # numeric comes back as Decimal; the API speaks JSON floats.
         cost_usd=float(row["cost_usd"] or 0),
         merge_cost_usd=float(row["merge_cost_usd"] or 0),
@@ -762,6 +766,7 @@ async def _read_attachments(uploads: list[UploadFile]) -> list[tuple[str, str | 
 async def create_job(
     prompt: str = Form(...),
     files: list[UploadFile] = File(default=[]),
+    issue_id: str | None = Form(default=None),
     user: UserOut = Depends(require_permission("development:run")),
 ) -> Job:
     """Queue a job, optionally with screenshots/files the agent should look at.
@@ -794,8 +799,8 @@ async def create_job(
         async with conn.transaction():
             row = await conn.fetchrow(
                 """
-                INSERT INTO dev_jobs (title, prompt, agent, model, status, created_by)
-                VALUES ($1, $2, $3, $4, 'pending', $5)
+                INSERT INTO dev_jobs (title, prompt, agent, model, status, created_by, issue_id)
+                VALUES ($1, $2, $3, $4, 'pending', $5, $6)
                 RETURNING *
                 """,
                 title,
@@ -803,6 +808,7 @@ async def create_job(
                 agent.agent,
                 agent.model,
                 user.id,
+                issue_id,
             )
             if attachments:
                 await conn.executemany(
