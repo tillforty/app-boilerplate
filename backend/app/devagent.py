@@ -590,7 +590,7 @@ class Job(BaseModel):
     files: list[JobFile] = []
     merged_at: datetime | None = None
     release_id: int | None = None
-    issue_id: str | None = None
+    issue_id: str | None = Field(default=None, description="Optional Sentry issue ID linked to this job")
     # What the run cost. merge_cost_usd is the part of cost_usd spent resolving
     # conflicts, so never add the two together.
     cost_usd: float = 0
