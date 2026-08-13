@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useState } from 'react'
-import { CheckCircle2, Circle, ExternalLink, RefreshCw } from 'lucide-react'
+import { CheckCircle2, Circle, ExternalLink, RefreshCw, MoreVertical } from 'lucide-react'
 import { useTabParam } from '@/lib/use-tab-param'
 import { usePermissions } from '@/context/PermissionsContext'
 import { useTranslation } from '@/i18n'
 import {
   getDevSetup,
   listIssues,
+  resolveIssue,
+  createJobFromIssue,
   type DevSetupStatus,
   type Issue,
 } from '@/lib/development'
@@ -22,6 +24,12 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { TableEmptyState } from '@/components/ui/table-empty-state'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import AgentTab from '@/components/development/AgentTab'
 
 const TABS = ['agent', 'issues', 'support'] as const
@@ -124,6 +132,33 @@ function IssuesList({
   uiUrl: string | null
 }) {
   const { t } = useTranslation()
+  const [creatingJobId, setCreatingJobId] = useState<string | null>(null)
+  const [resolvingId, setResolvingId] = useState<string | null>(null)
+
+  const handleCreateJob = async (issueId: string) => {
+    try {
+      setCreatingJobId(issueId)
+      await createJobFromIssue(issueId)
+      onRefresh()
+    } catch (error) {
+      console.error('Failed to create job:', error)
+    } finally {
+      setCreatingJobId(null)
+    }
+  }
+
+  const handleResolveIssue = async (issueId: string) => {
+    try {
+      setResolvingId(issueId)
+      await resolveIssue(issueId)
+      onRefresh()
+    } catch (error) {
+      console.error('Failed to resolve issue:', error)
+    } finally {
+      setResolvingId(null)
+    }
+  }
+
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-end gap-2">
@@ -151,6 +186,7 @@ function IssuesList({
               <TableHead>{t('development.colLevel')}</TableHead>
               <TableHead className="text-right">{t('development.colEvents')}</TableHead>
               <TableHead className="text-right">{t('development.colUsers')}</TableHead>
+              <TableHead>{t('development.colFirstSeen')}</TableHead>
               <TableHead>{t('development.colLastSeen')}</TableHead>
               <TableHead className="text-right">{t('development.colActions')}</TableHead>
             </TableRow>
@@ -158,7 +194,7 @@ function IssuesList({
           <TableBody>
             {issues.length === 0 ? (
               <TableEmptyState
-                colSpan={6}
+                colSpan={7}
                 icon={CheckCircle2}
                 title={t('development.issuesEmptyTitle')}
                 description={t('development.issuesEmpty')}
@@ -179,21 +215,52 @@ function IssuesList({
                   </TableCell>
                   <TableCell className="text-right tabular-nums">{it.count}</TableCell>
                   <TableCell className="text-right tabular-nums">{it.user_count}</TableCell>
-                  <TableCell className="whitespace-nowrap text-muted-foreground">
+                  <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
+                    {fmt(it.first_seen)}
+                  </TableCell>
+                  <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
                     {fmt(it.last_seen)}
                   </TableCell>
                   <TableCell className="text-right">
-                    {it.web_url && (
-                      <a
-                        href={it.web_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center text-primary hover:underline"
+                    <div className="flex items-center justify-end gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleCreateJob(it.id)}
+                        disabled={creatingJobId === it.id}
                       >
-                        {t('development.open')}
-                        <ExternalLink className="ml-1 h-3.5 w-3.5" />
-                      </a>
-                    )}
+                        {creatingJobId === it.id
+                          ? t('development.creating')
+                          : t('development.prepareJob')}
+                      </Button>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button type="button" variant="ghost" size="sm">
+                            <MoreVertical className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem
+                            onClick={() => handleResolveIssue(it.id)}
+                            disabled={resolvingId === it.id}
+                          >
+                            {resolvingId === it.id
+                              ? t('development.resolving')
+                              : t('development.resolve')}
+                          </DropdownMenuItem>
+                          {it.web_url && (
+                            <DropdownMenuItem
+                              onClick={() =>
+                                window.open(it.web_url, '_blank', 'noopener,noreferrer')
+                              }
+                            >
+                              {t('development.open')}
+                            </DropdownMenuItem>
+                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))

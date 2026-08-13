@@ -143,7 +143,8 @@ export interface Dictionary {
     | 'title' | 'subtitle' | 'tabAgent' | 'tabIssues' | 'tabSupport'
     | 'comingSoon' | 'comingSoonHint' | 'noPermission'
     | 'issuesEmpty' | 'issuesEmptyTitle' | 'issuesError' | 'refresh'
-    | 'colIssue' | 'colLevel' | 'colEvents' | 'colUsers' | 'colLastSeen' | 'colActions' | 'open'
+    | 'colIssue' | 'colLevel' | 'colEvents' | 'colUsers' | 'colFirstSeen' | 'colLastSeen' | 'colActions' | 'open'
+    | 'prepareJob' | 'resolve' | 'resolving' | 'creating' | 'firstSeen'
     | 'setupTitle' | 'setupIntro' | 'openGlitchtip' | 'redeployNote'
     | 'step1Title' | 'step1Desc' | 'step2Title' | 'step2Desc'
     | 'step3Title' | 'step3Desc' | 'step4Title' | 'step4Desc',
@@ -516,9 +517,15 @@ export const en: Dictionary = {
     colLevel: 'Level',
     colEvents: 'Events',
     colUsers: 'Users',
+    colFirstSeen: 'First seen',
     colLastSeen: 'Last seen',
     colActions: 'Actions',
     open: 'Open',
+    prepareJob: 'Prepare job',
+    resolve: 'Resolve',
+    resolving: 'Resolving...',
+    creating: 'Creating...',
+    firstSeen: 'First seen',
     setupTitle: 'Set up live error tracking',
     setupIntro: 'Complete these steps to see errors here live:',
     openGlitchtip: 'Open GlitchTip',
