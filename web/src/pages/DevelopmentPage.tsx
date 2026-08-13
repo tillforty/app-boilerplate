@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { CheckCircle2, Circle, ExternalLink, RefreshCw, MoreVertical } from 'lucide-react'
 import { useTabParam } from '@/lib/use-tab-param'
 import { usePermissions } from '@/context/PermissionsContext'
@@ -137,13 +138,19 @@ function IssuesList({
   onRefresh,
   uiUrl,
   onOpen,
+  onOpenJob,
 }: {
   issues: Issue[]
   onRefresh: () => void
   uiUrl: string | null
   onOpen: (id: string) => void
+  onOpenJob: (jobId: number) => void
 }) {
   const { t } = useTranslation()
+  const { can } = usePermissions()
+  // Linking to a job is only useful to someone allowed to open the Agent tab;
+  // without it that tab renders a permission notice, so the link would dead-end.
+  const canSeeJobs = can('development:read')
   const [creatingJobId, setCreatingJobId] = useState<string | null>(null)
   const [resolvingId, setResolvingId] = useState<string | null>(null)
 
@@ -241,17 +248,32 @@ function IssuesList({
                   </TableCell>
                   <TableCell className="text-right">
                     <div className="flex items-center justify-end gap-2">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleCreateJob(it.id)}
-                        disabled={creatingJobId === it.id}
-                      >
-                        {creatingJobId === it.id
-                          ? t('development.creating')
-                          : t('development.prepareJob')}
-                      </Button>
+                      {/* An issue that already has a job links to that work
+                          instead of offering to start it over again. */}
+                      {it.job_id ? (
+                        canSeeJobs && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => onOpenJob(it.job_id!)}
+                          >
+                            {t('development.viewJob')}
+                          </Button>
+                        )
+                      ) : (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleCreateJob(it.id)}
+                          disabled={creatingJobId === it.id}
+                        >
+                          {creatingJobId === it.id
+                            ? t('development.creating')
+                            : t('development.prepareJob')}
+                        </Button>
+                      )}
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <Button type="button" variant="ghost" size="sm">
@@ -300,6 +322,7 @@ function IssuesTab({
   setup,
   issues,
   onRefresh,
+  onOpenJob,
 }: {
   canView: boolean
   loading: boolean
@@ -307,6 +330,7 @@ function IssuesTab({
   setup: DevSetupStatus | null
   issues: Issue[] | null
   onRefresh: () => void
+  onOpenJob: (jobId: number) => void
 }) {
   const { t } = useTranslation()
   const [detail, setDetail] = useState<IssueDetail | null>(null)
@@ -349,6 +373,7 @@ function IssuesTab({
         onRefresh={onRefresh}
         uiUrl={setup?.ui_url ?? null}
         onOpen={openIssue}
+        onOpenJob={onOpenJob}
       />
       <IssueDetailDialog detail={detail} onClose={() => setDetail(null)} />
     </>
@@ -470,9 +495,27 @@ export default function DevelopmentPage() {
   const canView = can('roles:manage')
   const canAgent = can('development:read')
   const [tab, setTab] = useTabParam<Tab>(TABS, 'agent')
+  const [, setParams] = useSearchParams()
   const [agentCount, setAgentCount] = useState<number | null>(null)
   // Stable identity so AgentTab's refresh callback doesn't re-fire every render.
   const onAgentCount = useCallback((n: number) => setAgentCount(n), [])
+
+  /** Jump from an issue to the job that was created for it: switch to the Agent
+   *  tab and hand it the job id, which it opens and then clears from the URL. */
+  const onOpenJob = useCallback(
+    (jobId: number) => {
+      setParams(
+        (prev) => {
+          const p = new URLSearchParams(prev)
+          p.set('tab', 'agent')
+          p.set('job', String(jobId))
+          return p
+        },
+        { replace: true },
+      )
+    },
+    [setParams],
+  )
 
   const [setup, setSetup] = useState<DevSetupStatus | null>(null)
   const [issues, setIssues] = useState<Issue[] | null>(null)
@@ -548,6 +591,7 @@ export default function DevelopmentPage() {
             setup={setup}
             issues={issues}
             onRefresh={() => setReloadKey((k) => k + 1)}
+            onOpenJob={onOpenJob}
           />
         </TabsContent>
         <TabsContent value="support">

@@ -144,7 +144,7 @@ export interface Dictionary {
     | 'comingSoon' | 'comingSoonHint' | 'noPermission'
     | 'issuesEmpty' | 'issuesEmptyTitle' | 'issuesError' | 'refresh'
     | 'colIssue' | 'colLevel' | 'colEvents' | 'colUsers' | 'colFirstSeen' | 'colLastSeen' | 'colActions' | 'open'
-    | 'prepareJob' | 'resolve' | 'resolving' | 'creating' | 'firstSeen'
+    | 'prepareJob' | 'viewJob' | 'resolve' | 'resolving' | 'creating' | 'firstSeen'
     | 'setupTitle' | 'setupIntro' | 'openGlitchtip' | 'redeployNote'
     | 'issueLoadFailed' | 'issueSeen' | 'issueException' | 'issueStack'
     | 'issueNoStack' | 'issueInApp' | 'issueTags'
@@ -524,6 +524,7 @@ export const en: Dictionary = {
     colActions: 'Actions',
     open: 'Open',
     prepareJob: 'Prepare job',
+    viewJob: 'View job',
     resolve: 'Resolve',
     resolving: 'Resolving...',
     creating: 'Creating...',

@@ -25,6 +25,10 @@ export interface Issue {
   first_seen: string | null
   last_seen: string | null
   web_url: string | null
+  /** Newest job created from this issue, when one exists — the UI links to it
+   *  instead of offering to prepare another. */
+  job_id: number | null
+  job_status: string | null
 }
 
 export interface IssueList {

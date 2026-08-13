@@ -9,7 +9,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 
-from . import devagent, observability
+from . import db, devagent, observability
 from .auth import UserOut
 from .roles import require_permission
 
@@ -41,6 +41,10 @@ class Issue(BaseModel):
     first_seen: str | None = None
     last_seen: str | None = None
     web_url: str | None = None
+    # The most recent job created from this issue, when there is one. Lets the
+    # UI link to existing work instead of offering to start it a second time.
+    job_id: int | None = None
+    job_status: str | None = None
 
 
 class IssueList(BaseModel):
@@ -88,6 +92,27 @@ async def get_setup(
     return DevSetupStatus(**observability.setup_status())
 
 
+async def _jobs_by_issue(issue_ids: list[str]) -> dict[str, dict]:
+    """Newest job per issue id, for the issues that have one.
+
+    DISTINCT ON keeps only the latest job when an issue has been worked more
+    than once (a first attempt that failed, say), so the UI links to the run
+    that actually reflects the current state.
+    """
+    if not issue_ids:
+        return {}
+    rows = await db.get_pool().fetch(
+        """
+        SELECT DISTINCT ON (issue_id) issue_id, id, status
+        FROM dev_jobs
+        WHERE issue_id = ANY($1::text[])
+        ORDER BY issue_id, created_at DESC
+        """,
+        issue_ids,
+    )
+    return {r["issue_id"]: {"job_id": r["id"], "job_status": r["status"]} for r in rows}
+
+
 @router.get("/issues", response_model=IssueList)
 async def get_issues(
     query: str | None = Query(default=None, description="Sentry issue query, e.g. 'is:unresolved'"),
@@ -113,7 +138,11 @@ async def get_issues(
             status.HTTP_502_BAD_GATEWAY,
             f"Could not reach the error tracker: {exc}",
         ) from exc
-    return IssueList(configured=True, issues=[Issue(**i) for i in issues])
+    jobs = await _jobs_by_issue([str(i["id"]) for i in issues if i.get("id")])
+    return IssueList(
+        configured=True,
+        issues=[Issue(**{**i, **jobs.get(str(i.get("id")), {})}) for i in issues],
+    )
 
 
 @router.post("/issues/{issue_id}/resolve", status_code=status.HTTP_204_NO_CONTENT)

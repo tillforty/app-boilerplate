@@ -18,7 +18,7 @@ import {
   RotateCcw,
   X,
 } from 'lucide-react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { useTranslation } from '@/i18n'
 import { usePermissions } from '@/context/PermissionsContext'
 import {
@@ -496,6 +496,32 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
       mounted.current = false
     }
   }, [])
+
+  // `?job=<id>` arrives when the Issues tab links to the job made for an issue.
+  // Open it, then drop the param so a later refresh doesn't reopen the dialog
+  // after the user has closed it.
+  const [params, setParams] = useSearchParams()
+  const jobParam = params.get('job')
+  useEffect(() => {
+    if (!jobParam) return
+    const id = Number(jobParam)
+    setParams(
+      (prev) => {
+        const p = new URLSearchParams(prev)
+        p.delete('job')
+        return p
+      },
+      { replace: true },
+    )
+    if (!Number.isFinite(id)) return
+    void getJob(id)
+      .then((d) => {
+        if (mounted.current) setDetail(d)
+      })
+      .catch(() => {
+        /* a stale or hand-edited id just means nothing to open */
+      })
+  }, [jobParam, setParams])
 
   const refresh = useCallback(async () => {
     try {

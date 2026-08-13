@@ -332,6 +332,7 @@ export const lt: Dictionary = {
     colActions: 'Veiksmai',
     open: 'Atidaryti',
     prepareJob: 'Paruošti užduotį',
+    viewJob: 'Peržiūrėti užduotį',
     resolve: 'Išspręsti',
     resolving: 'Sprendžiama...',
     creating: 'Kuriama...',
