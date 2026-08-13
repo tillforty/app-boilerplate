@@ -592,7 +592,7 @@ export const en: Dictionary = {
     attachments: 'Attachments',
     attach: 'Attach files',
     attachHint:
-      'Screenshots or files the agent should look at — up to {max}, {size} each.',
+      'Screenshots or files the agent should look at — attach them or paste a screenshot straight in, up to {max}, {size} each.',
     removeFile: 'Remove',
     downloadFile: 'Download',
     fileTooLarge: '{name} is larger than {size}.',

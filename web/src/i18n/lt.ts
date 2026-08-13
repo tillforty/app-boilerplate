@@ -403,7 +403,7 @@ export const lt: Dictionary = {
     attachments: 'Priedai',
     attach: 'Prisegti failus',
     attachHint:
-      'Ekrano nuotraukos ar failai, kuriuos agentas turėtų peržiūrėti — iki {max}, po {size}.',
+      'Ekrano nuotraukos ar failai, kuriuos agentas turėtų peržiūrėti — prisekite arba tiesiog įklijuokite ekrano nuotrauką, iki {max}, po {size}.',
     removeFile: 'Pašalinti',
     downloadFile: 'Atsisiųsti',
     fileTooLarge: '{name} yra didesnis nei {size}.',
