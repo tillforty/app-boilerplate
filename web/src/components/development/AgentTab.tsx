@@ -229,23 +229,27 @@ function PickedFile({ file, onRemove }: { file: File; onRemove: () => void }) {
   )
 }
 
-/** The attach button plus the list of files picked so far, shared by the prompt
- *  and answer dialogs. Ceilings are checked here as well as in the API, so an
- *  oversized screenshot fails instantly instead of after the upload. */
-function AttachmentPicker({
-  files,
-  onChange,
-}: {
-  files: File[]
-  onChange: (files: File[]) => void
-}) {
-  const { t } = useTranslation()
-  const inputRef = useRef<HTMLInputElement>(null)
-  const [error, setError] = useState<string | null>(null)
+/** A screenshot on the clipboard is handed over as `image.png` by every browser,
+ *  so number those — otherwise three of them read identically in the list, in
+ *  the queue event and in the PR body. An image copied from the file manager
+ *  arrives the same way but already has a real name; leave it alone. */
+function pastedFile(file: File, n: number): File {
+  if (file.name && !/^image\.[a-z0-9]+$/i.test(file.name)) return file
+  const ext = /\.[a-z0-9]+$/i.exec(file.name)?.[0] ?? `.${file.type.split('/')[1] || 'png'}`
+  return new File([file], `screenshot-${n}${ext}`, { type: file.type })
+}
 
-  function onPick(e: React.ChangeEvent<HTMLInputElement>) {
-    const picked = Array.from(e.target.files ?? [])
-    e.target.value = ''
+/** The files picked for one prompt or one answer. Ceilings are checked here as
+ *  well as in the API, so an oversized screenshot fails instantly instead of
+ *  after the upload. State lives in the dialog rather than in the picker
+ *  because a paste lands on the textarea, outside it. */
+function useAttachments() {
+  const { t } = useTranslation()
+  const [files, setFiles] = useState<File[]>([])
+  const [error, setError] = useState<string | null>(null)
+  const pasteCount = useRef(0)
+
+  function add(picked: File[]) {
     if (picked.length === 0) return
     setError(null)
 
@@ -263,7 +267,47 @@ function AttachmentPicker({
       setError(t('agent.filesTooLarge', { size: fmtSize(MAX_JOB_FILES_TOTAL_BYTES) }))
       return
     }
-    onChange(next)
+    setFiles(next)
+  }
+
+  /** Ctrl/Cmd+V anywhere in the dialog attaches the images on the clipboard —
+   *  a screenshot is pasted, not saved and then picked. Anything else on the
+   *  clipboard is left alone: text pasted alongside an image still lands in the
+   *  textarea, and only an image-only paste swallows the keystroke. */
+  function onPaste(e: React.ClipboardEvent) {
+    const images = Array.from(e.clipboardData.files).filter((f) => f.type.startsWith('image/'))
+    if (images.length === 0) return
+    if (!e.clipboardData.getData('text')) e.preventDefault()
+    add(images.map((f) => pastedFile(f, ++pasteCount.current)))
+  }
+
+  function remove(index: number) {
+    setError(null)
+    setFiles(files.filter((_, i) => i !== index))
+  }
+
+  function reset() {
+    setFiles([])
+    setError(null)
+    pasteCount.current = 0
+  }
+
+  return { files, error, add, remove, reset, onPaste }
+}
+
+type Attachments = ReturnType<typeof useAttachments>
+
+/** The attach button plus the list of files picked so far, shared by the prompt
+ *  and answer dialogs. */
+function AttachmentPicker({ attachments }: { attachments: Attachments }) {
+  const { t } = useTranslation()
+  const inputRef = useRef<HTMLInputElement>(null)
+  const { files, error } = attachments
+
+  function onPick(e: React.ChangeEvent<HTMLInputElement>) {
+    const picked = Array.from(e.target.files ?? [])
+    e.target.value = ''
+    attachments.add(picked)
   }
 
   return (
@@ -282,10 +326,7 @@ function AttachmentPicker({
             <PickedFile
               key={`${file.name}-${index}`}
               file={file}
-              onRemove={() => {
-                setError(null)
-                onChange(files.filter((_, i) => i !== index))
-              }}
+              onRemove={() => attachments.remove(index)}
             />
           ))}
         </ul>
@@ -410,14 +451,14 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
 
   const [newOpen, setNewOpen] = useState(false)
   const [prompt, setPrompt] = useState('')
-  const [files, setFiles] = useState<File[]>([])
+  const attachments = useAttachments()
   const [submitting, setSubmitting] = useState(false)
 
   const [editFor, setEditFor] = useState<Job | null>(null)
   const [editPrompt, setEditPrompt] = useState('')
   const [answerFor, setAnswerFor] = useState<Job | null>(null)
   const [answer, setAnswer] = useState('')
-  const [answerFiles, setAnswerFiles] = useState<File[]>([])
+  const answerAttachments = useAttachments()
   const [detail, setDetail] = useState<JobDetail | null>(null)
   const [busyId, setBusyId] = useState<number | null>(null)
   const [releasing, setReleasing] = useState(false)
@@ -478,7 +519,7 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
 
   function closeNew() {
     setNewOpen(false)
-    setFiles([])
+    attachments.reset()
   }
 
   async function onCreate(e: FormEvent) {
@@ -487,7 +528,7 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
     setSubmitting(true)
     setError(null)
     try {
-      await createJob({ prompt: prompt.trim(), files })
+      await createJob({ prompt: prompt.trim(), files: attachments.files })
       setPrompt('')
       closeNew()
       await refresh()
@@ -515,7 +556,7 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
   function closeAnswer() {
     setAnswerFor(null)
     setAnswer('')
-    setAnswerFiles([])
+    answerAttachments.reset()
   }
 
   /** Ship every merged function in one rebuild. */
@@ -546,7 +587,7 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
     if (!answerFor || !answer.trim()) return
     const job = answerFor
     const text = answer.trim()
-    const attached = answerFiles
+    const attached = answerAttachments.files
     closeAnswer()
     await act(job.id, () => answerJob(job.id, text, attached), t('agent.answerFailed'))
   }
@@ -812,7 +853,9 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
               </DialogTitle>
               <DialogDescription>{t('agent.newJobHint')}</DialogDescription>
             </DialogHeader>
-            <div className="space-y-2 py-4">
+            {/* Paste is caught on the whole body, not just the textarea, so a
+                screenshot attaches wherever the caret happens to be. */}
+            <div className="space-y-2 py-4" onPaste={attachments.onPaste}>
               <Label htmlFor="job-prompt">{t('agent.prompt')}</Label>
               <Textarea
                 id="job-prompt"
@@ -824,7 +867,7 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
               <p className="text-xs text-muted-foreground">{t('agent.titleGenerated')}</p>
 
               <div className="pt-2">
-                <AttachmentPicker files={files} onChange={setFiles} />
+                <AttachmentPicker attachments={attachments} />
               </div>
             </div>
             <DialogFooter>
@@ -876,7 +919,7 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
               <DialogTitle>{t('agent.answerTitle')}</DialogTitle>
               <DialogDescription>{t('agent.answerHint')}</DialogDescription>
             </DialogHeader>
-            <div className="space-y-4 py-4">
+            <div className="space-y-4 py-4" onPaste={answerAttachments.onPaste}>
               <div className="whitespace-pre-line rounded-md border bg-muted/40 px-3 py-2 text-sm">
                 {answerFor?.question}
               </div>
@@ -889,7 +932,7 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
                   onChange={(e) => setAnswer(e.target.value)}
                 />
               </div>
-              <AttachmentPicker files={answerFiles} onChange={setAnswerFiles} />
+              <AttachmentPicker attachments={answerAttachments} />
             </div>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={closeAnswer}>

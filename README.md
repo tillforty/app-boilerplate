@@ -689,9 +689,12 @@ settings). The administrator role holds `*` and gets all four.
 
 **Screenshots and files with the prompt.** *New job* takes attachments as well
 as text — drop in a screenshot of the broken screen, a log, or a spec — and so
-does the answer box, since the agent's question is usually about a screen. They
-are uploaded with the prompt in one request (the runner can claim the job seconds
-later), kept in `dev_job_files` in Postgres rather than the file storage backend
+does the answer box, since the agent's question is usually about a screen. A
+screenshot can be pasted straight into either dialog with Ctrl/Cmd+V instead of
+being saved and picked; pasted images are named `screenshot-1.png`, `-2`, … so
+several stay tellable apart. Attachments are uploaded with the prompt in one
+request (the runner can claim the job seconds later), kept in `dev_job_files`
+in Postgres rather than the file storage backend
 — the runner container talks to the database and nothing else — and written into
 `.agent/attachments/` in the throw-away workspace, where the CLI is told to open
 them. That directory is git-excluded, so an attachment never lands in the commit;
