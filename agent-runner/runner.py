@@ -196,20 +196,25 @@ async def gh_put(token: str, path: str, body: dict) -> httpx.Response:
 
 
 async def resolve_issue_via_sentry(issue_id: str) -> None:
-    """Resolve an issue in Sentry/GlitchTip via its REST API."""
+    """Resolve an issue in Sentry/GlitchTip via its REST API.
+
+    Organization-scoped on purpose: the project-scoped issue URL used by the read
+    paths has no PUT handler (405), and the API token needs `event:write` as well
+    as the read scopes or this returns 403. Both were wrong here, which is why a
+    deployed job left its issue sitting open.
+    """
     org_slug = os.environ.get("SENTRY_ORG_SLUG", "").strip()
-    project_slug = os.environ.get("SENTRY_PROJECT_SLUG", "").strip()
     api_token = os.environ.get("SENTRY_API_TOKEN", "").strip()
     api_url = os.environ.get("SENTRY_API_URL", "").strip().rstrip("/")
 
     if not api_url:
         api_url = "http://glitchtip:8080"
 
-    if not (org_slug and project_slug and api_token):
+    if not (org_slug and api_token):
         log(f"Cannot resolve issue {issue_id}: Sentry API not configured")
         return
 
-    url = f"{api_url}/api/0/projects/{org_slug}/{project_slug}/issues/{issue_id}/"
+    url = f"{api_url}/api/0/organizations/{org_slug}/issues/{issue_id}/"
     async with httpx.AsyncClient(timeout=15) as c:
         resp = await c.put(
             url,

@@ -266,14 +266,19 @@ async def fetch_issues(query: str | None = None, limit: int = 50) -> list[dict]:
 
 async def resolve_issue(issue_id: str) -> None:
     """Mark an issue as resolved in GlitchTip/Sentry. Raises when unconfigured
-    or when the API call fails."""
+    or when the API call fails.
+
+    Note the URL is organization-scoped, not project-scoped like the read paths:
+    the project-scoped issue URL has no PUT handler (it answers 405), and the
+    token needs `event:write` on top of the read scopes or this comes back 403.
+    """
     if not api_configured():
         raise RuntimeError("Issue API is not configured (token/org/project slug missing).")
 
     import httpx
 
     base = _api_base()
-    url = f"{base}/api/0/projects/{SENTRY_ORG_SLUG}/{SENTRY_PROJECT_SLUG}/issues/{issue_id}/"
+    url = f"{base}/api/0/organizations/{SENTRY_ORG_SLUG}/issues/{issue_id}/"
 
     async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.put(

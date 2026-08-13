@@ -3,7 +3,7 @@
     ./manage.py shell -c "exec(open('/tmp/tf_provision.py').read())"
 
 Idempotently creates an admin user, organization, project, DSN, and a
-read-scoped API token, then prints a machine-parseable block that start.sh
+mostly-read API token, then prints a machine-parseable block that start.sh
 parses back into .env (SENTRY_DSN / VITE_SENTRY_DSN / SENTRY_API_TOKEN /
 SENTRY_ORG_SLUG / SENTRY_PROJECT_SLUG). Re-running is safe: existing objects are
 reused, so the app's error capture + Development › Issues page wire up on the
@@ -33,7 +33,18 @@ password = os.environ.get("GLITCHTIP_ADMIN_PASSWORD") or ""
 org_name = (os.environ.get("GLITCHTIP_ORG_NAME") or "Tillforty").strip()
 project_name = (os.environ.get("GLITCHTIP_PROJECT_NAME") or "tillforty-app").strip()
 TOKEN_LABEL = "tillforty-app"
-READ_SCOPES = {"org:read", "project:read", "event:read", "member:read", "team:read"}
+# Reads drive the in-app Issues feed. `event:write` is the one mutating scope,
+# and it is required: resolving an issue — from the Resolve action, or
+# automatically once the job created for it deploys — is a PUT on the issue, and
+# a read-only token gets a bare 403 back.
+TOKEN_SCOPES = {
+    "org:read",
+    "project:read",
+    "event:read",
+    "event:write",
+    "member:read",
+    "team:read",
+}
 
 if not email or not password:
     print("__TF_ERROR__ missing GLITCHTIP_ADMIN_EMAIL / GLITCHTIP_ADMIN_PASSWORD")
@@ -76,16 +87,22 @@ with transaction.atomic():
     dsn_public = key.get_dsn()  # respects GLITCHTIP_DOMAIN (public host)
     dsn_internal = "http://%s@glitchtip:8080/%s" % (key.public_key.hex, project.id)
 
-    # Read-scoped API token for the in-app Issues feed. Build the bitmask from
-    # the field's own flag order so it stays correct across GlitchTip versions.
+    # API token for the in-app Issues feed. Build the bitmask from the field's
+    # own flag order so it stays correct across GlitchTip versions.
     flags = list(APIToken._meta.get_field("scopes").flags)
     mask = 0
     for i, name in enumerate(flags):
-        if name in READ_SCOPES:
+        if name in TOKEN_SCOPES:
             mask |= 1 << i
     token = APIToken.objects.filter(user=user, label=TOKEN_LABEL).first()
     if token is None:
         token = APIToken.objects.create(user=user, label=TOKEN_LABEL, scopes=mask)
+    elif token.scopes != mask:
+        # An install provisioned before event:write was included still holds a
+        # read-only token; widen it in place rather than stranding it, since
+        # provisioning only re-runs while SENTRY_DSN is empty.
+        token.scopes = mask
+        token.save(update_fields=["scopes"])
 
 print("__TF_PROVISION__")
 print("ORG_SLUG=" + org.slug)
