@@ -497,31 +497,49 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
     }
   }, [])
 
-  // `?job=<id>` arrives when the Issues tab links to the job made for an issue.
-  // Open it, then drop the param so a later refresh doesn't reopen the dialog
-  // after the user has closed it.
+  // `?job=<id>` is the source of truth for which job dialog is open, rather than
+  // state alone: the URL then survives a refresh, can be linked to from the
+  // Issues tab, and is something the user can copy out of the address bar to
+  // point a colleague at one job.
   const [params, setParams] = useSearchParams()
   const jobParam = params.get('job')
+
+  const openJob = useCallback(
+    (id: number | null) => {
+      setParams(
+        (prev) => {
+          const p = new URLSearchParams(prev)
+          if (id === null) p.delete('job')
+          else p.set('job', String(id))
+          return p
+        },
+        { replace: true },
+      )
+    },
+    [setParams],
+  )
+
   useEffect(() => {
-    if (!jobParam) return
     const id = Number(jobParam)
-    setParams(
-      (prev) => {
-        const p = new URLSearchParams(prev)
-        p.delete('job')
-        return p
-      },
-      { replace: true },
-    )
-    if (!Number.isFinite(id)) return
+    if (!jobParam || !Number.isFinite(id)) {
+      setDetail(null)
+      return
+    }
+    if (detail?.id === id) return // already showing it — don't refetch on every render
+    let active = true
     void getJob(id)
       .then((d) => {
-        if (mounted.current) setDetail(d)
+        if (active && mounted.current) setDetail(d)
       })
       .catch(() => {
-        /* a stale or hand-edited id just means nothing to open */
+        // A stale or hand-edited id has nothing to show; drop it so the URL
+        // doesn't keep claiming a dialog is open.
+        if (active) openJob(null)
       })
-  }, [jobParam, setParams])
+    return () => {
+      active = false
+    }
+  }, [jobParam, detail?.id, openJob])
 
   const refresh = useCallback(async () => {
     try {
@@ -615,7 +633,8 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
     setError(null)
     try {
       await deleteJob(job.id)
-      if (detail?.id === job.id) setDetail(null)
+      // Clear the URL too, or the effect would just refetch the job we deleted.
+      if (detail?.id === job.id) openJob(null)
       await refresh()
     } catch (err) {
       setError(err instanceof Error ? err.message : t('agent.deleteFailed'))
@@ -679,15 +698,14 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
   function jobRow(job: Job, variant: JobsVariant) {
     return (
       <TableRow key={job.id}>
+        <TableCell className="whitespace-nowrap font-mono text-xs text-muted-foreground">
+          #{job.id}
+        </TableCell>
         <TableCell className="max-w-sm">
           <button
             type="button"
             className="truncate text-left font-medium hover:underline"
-            onClick={() =>
-              void getJob(job.id)
-                .then(setDetail)
-                .catch((e) => setError(e instanceof Error ? e.message : t('agent.loadFailed')))
-            }
+            onClick={() => openJob(job.id)}
           >
             {job.title}
           </button>
@@ -832,6 +850,7 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
         <Table>
           <TableHeader>
             <TableRow>
+              <TableHead className="w-16">{t('agent.colId')}</TableHead>
               <TableHead>{t('agent.colJob')}</TableHead>
               <TableHead>{t('agent.colStartedBy')}</TableHead>
               {variant === 'pending' && <TableHead>{t('agent.colStatus')}</TableHead>}
@@ -845,7 +864,7 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
           <TableBody>
             {rows.length === 0 ? (
               <TableEmptyState
-                colSpan={7}
+                colSpan={8}
                 icon={variant === 'pending' ? Bot : Rocket}
                 title={emptyTitle}
                 description={empty}
@@ -1057,10 +1076,15 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
       </Dialog>
 
       {/* ── Job detail ──────────────────────────────────────────────────── */}
-      <Dialog open={detail !== null} onOpenChange={(o) => !o && setDetail(null)}>
+      <Dialog open={detail !== null} onOpenChange={(o) => !o && openJob(null)}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>{detail?.title}</DialogTitle>
+            <DialogTitle>
+              {detail && (
+                <span className="mr-2 font-mono text-sm text-muted-foreground">#{detail.id}</span>
+              )}
+              {detail?.title}
+            </DialogTitle>
             <DialogDescription>
               {detail &&
                 [
@@ -1150,7 +1174,7 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
                 <ExternalLink className="ml-2 h-4 w-4" />
               </Button>
             )}
-            <Button type="button" onClick={() => setDetail(null)}>
+            <Button type="button" onClick={() => openJob(null)}>
               {t('agent.close')}
             </Button>
           </DialogFooter>

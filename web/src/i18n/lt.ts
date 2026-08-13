@@ -429,6 +429,7 @@ export const lt: Dictionary = {
     deployedTitle: 'Įdiegta',
     deployedEmpty: 'Užduotys čia atsiras, kai jas išleis nauja versija.',
     deployedEmptyTitle: 'Dar nieko neįdiegta',
+    colId: 'ID',
     colJob: 'Užduotis',
     colStatus: 'Būsena',
     colPr: 'Pull request',

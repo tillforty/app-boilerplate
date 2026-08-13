@@ -174,7 +174,7 @@ export interface Dictionary {
     | 'fileTooLarge' | 'filesTooLarge' | 'tooManyFiles'
     | 'jobsEmpty' | 'jobsEmptyTitle'
     | 'pendingTitle' | 'deployedTitle' | 'deployedEmpty' | 'deployedEmptyTitle'
-    | 'colJob' | 'colStatus' | 'colPr' | 'colDeployed'
+    | 'colId' | 'colJob' | 'colStatus' | 'colPr' | 'colDeployed'
     | 'colStartedBy' | 'startedBy' | 'colCost' | 'costMerge' | 'costTooltip'
     | 'colDuration' | 'colStarted' | 'colEnded'
     | 'status_pending' | 'status_running' | 'status_answer_pending' | 'status_merged'
@@ -621,6 +621,7 @@ export const en: Dictionary = {
     deployedTitle: 'Deployed',
     deployedEmpty: 'Jobs appear here once a release ships them.',
     deployedEmptyTitle: 'Nothing deployed yet',
+    colId: 'ID',
     colJob: 'Job',
     colStatus: 'Status',
     colPr: 'Pull request',
