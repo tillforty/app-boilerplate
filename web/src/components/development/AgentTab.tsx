@@ -6,8 +6,10 @@ import {
   ExternalLink,
   GitPullRequest,
   MessageCircleQuestion,
+  MoreHorizontal,
   Paperclip,
   Pencil,
+  Trash2,
   Plus,
   RefreshCw,
   GitMerge,
@@ -26,6 +28,7 @@ import {
   cancelJob,
   createJob,
   createRelease,
+  deleteJob,
   downloadJobFile,
   fetchJobFile,
   getDevConfig,
@@ -68,6 +71,13 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { TableEmptyState } from '@/components/ui/table-empty-state'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 const POLL_MS = 5000
 
@@ -103,6 +113,19 @@ function fmt(dt: string | null): string {
   if (!dt) return '—'
   const d = new Date(dt)
   return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString()
+}
+
+/** How long the job actually took. A job that hasn't finished is measured
+ *  against now, so a running row keeps counting up as the list polls. */
+function fmtDuration(job: Job): string {
+  if (!job.started_at) return '—'
+  const start = new Date(job.started_at).getTime()
+  const end = job.finished_at ? new Date(job.finished_at).getTime() : Date.now()
+  const mins = Math.round((end - start) / 60000)
+  if (Number.isNaN(mins) || mins < 0) return '—'
+  if (mins < 1) return '<1 min'
+  if (mins < 60) return `${mins} min`
+  return `${Math.floor(mins / 60)} h ${mins % 60} min`
 }
 
 /** Sub-cent runs are common, so don't round them away to "$0.00". */
@@ -395,7 +418,8 @@ function SetupNotice({ config }: { config: DevConfig }) {
   )
 }
 
-/** `onCount` feeds the tab-strip badge on DevelopmentPage, which owns no data. */
+/** `onCount` feeds the tab-strip badge on DevelopmentPage, which owns no data.
+ *  It counts what still needs attention — everything not yet deployed. */
 export default function AgentTab({ onCount }: { onCount?: (n: number) => void }) {
   const { t } = useTranslation()
   const { can } = usePermissions()
@@ -420,6 +444,7 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
   const [answerFiles, setAnswerFiles] = useState<File[]>([])
   const [detail, setDetail] = useState<JobDetail | null>(null)
   const [busyId, setBusyId] = useState<number | null>(null)
+  const [deleteFor, setDeleteFor] = useState<Job | null>(null)
   const [releasing, setReleasing] = useState(false)
 
   // Guards against a slow in-flight refresh overwriting fresher state.
@@ -439,7 +464,8 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
       setJobs(j)
       setReleases(d)
       setError(null)
-      onCount?.(j.length)
+      // The badge is a to-do count, not a total: shipped work needs no attention.
+      onCount?.(j.filter((job) => job.status !== 'deployed').length)
     } catch (e) {
       if (mounted.current) setError(e instanceof Error ? e.message : t('agent.loadFailed'))
     } finally {
@@ -507,6 +533,25 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
       await refresh()
     } catch (err) {
       setError(err instanceof Error ? err.message : fallback)
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  /** Delete removes the row rather than changing it, so `act` — which refreshes
+   *  the job it just touched — isn't the right shape. */
+  async function onDelete() {
+    const job = deleteFor
+    if (!job) return
+    setDeleteFor(null)
+    setBusyId(job.id)
+    setError(null)
+    try {
+      await deleteJob(job.id)
+      if (detail?.id === job.id) setDetail(null)
+      await refresh()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('agent.deleteFailed'))
     } finally {
       setBusyId(null)
     }
@@ -593,9 +638,6 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
         <TableCell className="whitespace-nowrap text-muted-foreground">
           {job.created_by_name ?? '—'}
         </TableCell>
-        <TableCell className="whitespace-nowrap text-muted-foreground">
-          {t(`agent.agent_${job.agent}`)}
-        </TableCell>
         {variant === 'pending' && (
           <TableCell>
             <JobStatusBadge status={job.status} />
@@ -612,12 +654,13 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
         <TableCell>
           <CostCell job={job} />
         </TableCell>
-        <TableCell className="whitespace-nowrap text-muted-foreground">
-          {fmt(job.created_at)}
+        <TableCell className="whitespace-nowrap tabular-nums text-muted-foreground">
+          {fmtDuration(job)}
         </TableCell>
-        {variant === 'pending' && (
-          <TableCell className="text-right">
-            <div className="flex justify-end gap-2">
+        <TableCell className="text-right">
+          <div className="flex justify-end gap-2">
+            {variant === 'pending' && (
+              <>
               {job.status === 'pending' && canRun && (
                 <Button
                   type="button"
@@ -686,9 +729,32 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
                   {t('common.cancel')}
                 </Button>
               )}
+              </>
+            )}
+            {canRun && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button type="button" variant="ghost" size="icon" className="h-8 w-8">
+                    <MoreHorizontal className="h-4 w-4" />
+                    <span className="sr-only">{t('common.openMenu')}</span>
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem
+                    className="text-destructive focus:text-destructive"
+                    // In flight means the runner owns the row; the API refuses
+                    // it too, but there's no point offering the click.
+                    disabled={job.status === 'running' || job.status === 'deploying'}
+                    onClick={() => setDeleteFor(job)}
+                  >
+                    <Trash2 className="mr-2 h-4 w-4" />
+                    {t('common.delete')}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
             </div>
           </TableCell>
-        )}
       </TableRow>
     )
   }
@@ -701,21 +767,18 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
             <TableRow>
               <TableHead>{t('agent.colJob')}</TableHead>
               <TableHead>{t('agent.colStartedBy')}</TableHead>
-              <TableHead>{t('agent.colAgent')}</TableHead>
               {variant === 'pending' && <TableHead>{t('agent.colStatus')}</TableHead>}
               <TableHead>{t('agent.colPr')}</TableHead>
               {variant === 'deployed' && <TableHead>{t('agent.colDeployed')}</TableHead>}
               <TableHead>{t('agent.colCost')}</TableHead>
-              <TableHead>{t('agent.colCreated')}</TableHead>
-              {variant === 'pending' && (
-                <TableHead className="text-right">{t('development.colActions')}</TableHead>
-              )}
+              <TableHead>{t('agent.colDuration')}</TableHead>
+              <TableHead className="text-right">{t('development.colActions')}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {rows.length === 0 ? (
               <TableEmptyState
-                colSpan={variant === 'pending' ? 8 : 7}
+                colSpan={7}
                 icon={variant === 'pending' ? Bot : Rocket}
                 title={emptyTitle}
                 description={empty}
@@ -903,6 +966,27 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
         </DialogContent>
       </Dialog>
 
+      {/* ── Delete confirmation ─────────────────────────────────────────── */}
+      <Dialog open={deleteFor !== null} onOpenChange={(o) => !o && setDeleteFor(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('agent.deleteTitle')}</DialogTitle>
+            <DialogDescription>
+              {t('agent.deleteConfirm', { title: deleteFor?.title ?? '' })}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setDeleteFor(null)}>
+              {t('common.cancel')}
+            </Button>
+            <Button type="button" variant="destructive" onClick={() => void onDelete()}>
+              <Trash2 className="mr-2 h-4 w-4" />
+              {t('common.delete')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* ── Job detail ──────────────────────────────────────────────────── */}
       <Dialog open={detail !== null} onOpenChange={(o) => !o && setDetail(null)}>
         <DialogContent className="max-w-2xl">
@@ -926,6 +1010,18 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
                 {detail?.prompt}
               </p>
             </div>
+            {/* The exact clock times live here rather than in the table, which
+                shows the duration they add up to. */}
+            {detail && (
+              <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
+                <dt className="text-xs text-muted-foreground">{t('agent.colStarted')}</dt>
+                <dd>{fmt(detail.started_at)}</dd>
+                <dt className="text-xs text-muted-foreground">{t('agent.colEnded')}</dt>
+                <dd>{fmt(detail.finished_at)}</dd>
+                <dt className="text-xs text-muted-foreground">{t('agent.colDuration')}</dt>
+                <dd className="tabular-nums">{fmtDuration(detail)}</dd>
+              </dl>
+            )}
             {detail && detail.files.length > 0 && (
               <div className="space-y-1">
                 <p className="text-xs font-medium text-muted-foreground">
@@ -938,29 +1034,41 @@ export default function AgentTab({ onCount }: { onCount?: (n: number) => void })
                 </ul>
               </div>
             )}
-            {detail?.events?.length ? (
-              <div className="space-y-1">
-                <p className="text-xs font-medium text-muted-foreground">{t('agent.timeline')}</p>
-                <ul className="space-y-2">
-                  {detail.events.map((ev) => (
-                    <li key={ev.id} className="flex gap-3 text-sm">
-                      <span className="w-36 shrink-0 text-xs text-muted-foreground">
-                        {fmt(ev.created_at)}
-                      </span>
-                      <span className="whitespace-pre-line">{ev.message}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-            {detail?.log && (
-              <div className="space-y-1">
-                <p className="text-xs font-medium text-muted-foreground">{t('agent.log')}</p>
-                <pre className="overflow-x-auto rounded-md border bg-muted/40 p-3 text-xs">
-                  {detail.log}
-                </pre>
-              </div>
-            )}
+            {/* What happened, in two registers: the timeline is the summary a
+                human reads, the console is the raw run for when that isn't
+                enough. Tabbed rather than stacked — the log is long, and it
+                used to push the timeline off the top of the dialog. */}
+            <Tabs defaultValue="timeline">
+              <TabsList>
+                <TabsTrigger value="timeline">{t('agent.timeline')}</TabsTrigger>
+                <TabsTrigger value="console">{t('agent.console')}</TabsTrigger>
+              </TabsList>
+              <TabsContent value="timeline" className="pt-3">
+                {detail?.events?.length ? (
+                  <ul className="space-y-2">
+                    {detail.events.map((ev) => (
+                      <li key={ev.id} className="flex gap-3 text-sm">
+                        <span className="w-36 shrink-0 text-xs text-muted-foreground">
+                          {fmt(ev.created_at)}
+                        </span>
+                        <span className="whitespace-pre-line">{ev.message}</span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-sm text-muted-foreground">{t('agent.timelineEmpty')}</p>
+                )}
+              </TabsContent>
+              <TabsContent value="console" className="pt-3">
+                {detail?.log ? (
+                  <pre className="overflow-x-auto rounded-md border bg-muted/40 p-3 text-xs">
+                    {detail.log}
+                  </pre>
+                ) : (
+                  <p className="text-sm text-muted-foreground">{t('agent.consoleEmpty')}</p>
+                )}
+              </TabsContent>
+            </Tabs>
           </div>
           <DialogFooter>
             {detail?.pr_url && (

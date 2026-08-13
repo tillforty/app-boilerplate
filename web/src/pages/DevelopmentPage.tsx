@@ -114,11 +114,30 @@ function SetupChecklist({ setup }: { setup: DevSetupStatus }) {
 }
 
 /** The live issue list — same table styling as the app's other data tables. */
-function IssuesList({ issues, onRefresh }: { issues: Issue[]; onRefresh: () => void }) {
+function IssuesList({
+  issues,
+  onRefresh,
+  uiUrl,
+}: {
+  issues: Issue[]
+  onRefresh: () => void
+  uiUrl: string | null
+}) {
   const { t } = useTranslation()
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-end">
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        {uiUrl && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => window.open(uiUrl, '_blank', 'noopener,noreferrer')}
+          >
+            {t('development.openGlitchtip')}
+            <ExternalLink className="ml-2 h-4 w-4" />
+          </Button>
+        )}
         <Button type="button" variant="outline" size="sm" onClick={onRefresh}>
           <RefreshCw className="mr-2 h-4 w-4" />
           {t('development.refresh')}
@@ -221,7 +240,7 @@ function IssuesTab({
   if (setup && !setup.api_configured) {
     return <SetupChecklist setup={setup} />
   }
-  return <IssuesList issues={issues ?? []} onRefresh={onRefresh} />
+  return <IssuesList issues={issues ?? []} onRefresh={onRefresh} uiUrl={setup?.ui_url ?? null} />
 }
 
 export default function DevelopmentPage() {

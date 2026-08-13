@@ -1017,6 +1017,29 @@ async def retry_job(
     return await _job_out(full)
 
 
+@router.delete("/jobs/{job_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_job(
+    job_id: int,
+    _: UserOut = Depends(require_permission("development:run")),
+) -> None:
+    """Remove a job from the board. Events and attachments cascade with it.
+
+    Not while it is in flight: the runner is holding that row, and deleting it
+    from under a working agent orphans the CLI process and loses the branch it
+    is on. Cancel first, then delete. A deployed job can go — the release row
+    survives, it just stops naming the job it shipped.
+    """
+    row = await db.get_pool().fetchrow("SELECT status FROM dev_jobs WHERE id = $1", job_id)
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Job not found")
+    if row["status"] in {"running", "deploying"}:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "This job is still in flight. Cancel it first, then delete it.",
+        )
+    await db.get_pool().execute("DELETE FROM dev_jobs WHERE id = $1", job_id)
+
+
 @router.post("/jobs/{job_id}/cancel", response_model=Job)
 async def cancel_job(
     job_id: int,

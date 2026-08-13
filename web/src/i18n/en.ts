@@ -171,8 +171,9 @@ export interface Dictionary {
     | 'fileTooLarge' | 'filesTooLarge' | 'tooManyFiles'
     | 'jobsEmpty' | 'jobsEmptyTitle'
     | 'pendingTitle' | 'deployedTitle' | 'deployedEmpty' | 'deployedEmptyTitle'
-    | 'colJob' | 'colAgent' | 'colStatus' | 'colPr' | 'colDeployed' | 'colCreated'
+    | 'colJob' | 'colStatus' | 'colPr' | 'colDeployed'
     | 'colStartedBy' | 'startedBy' | 'colCost' | 'costMerge' | 'costTooltip'
+    | 'colDuration' | 'colStarted' | 'colEnded'
     | 'status_pending' | 'status_running' | 'status_answer_pending' | 'status_merged'
     | 'status_deployment_ready' | 'status_deploying' | 'status_deployed'
     | 'status_failed' | 'status_cancelled'
@@ -184,6 +185,8 @@ export interface Dictionary {
     | 'deployAll' | 'deploying' | 'releaseFailed'
     | 'retry' | 'retryFailed' | 'cancelFailed'
     | 'timeline' | 'log' | 'openPr' | 'close'
+    | 'console' | 'timelineEmpty' | 'consoleEmpty'
+    | 'deleteTitle' | 'deleteConfirm' | 'deleteFailed'
     | 'loadFailed' | 'createFailed'
     | 'setupNoRepo' | 'setupNoKey' | 'setupNoAgent' | 'setupNoRunner' | 'setupLink',
     string
@@ -602,14 +605,15 @@ export const en: Dictionary = {
     deployedEmpty: 'Jobs appear here once a release ships them.',
     deployedEmptyTitle: 'Nothing deployed yet',
     colJob: 'Job',
-    colAgent: 'Agent',
     colStatus: 'Status',
     colPr: 'Pull request',
     colDeployed: 'Deployed version',
-    colCreated: 'Created',
     colStartedBy: 'Started by',
     startedBy: 'started by',
     colCost: 'Cost',
+    colDuration: 'Duration',
+    colStarted: 'Started',
+    colEnded: 'Ended',
     costMerge: '{amount} on conflicts',
     costTooltip: '{input} in · {output} out · {cached} cached',
     status_pending: 'Pending',
@@ -647,6 +651,12 @@ export const en: Dictionary = {
     cancelFailed: 'Failed to cancel the job',
     timeline: 'Timeline',
     log: 'Log',
+    console: 'Console',
+    timelineEmpty: 'Nothing has happened on this job yet.',
+    consoleEmpty: 'This job produced no console output.',
+    deleteTitle: 'Delete job',
+    deleteConfirm: 'Delete “{title}”? Its history and attachments go with it, and this cannot be undone.',
+    deleteFailed: 'Failed to delete the job',
     openPr: 'Open pull request',
     close: 'Close',
     loadFailed: 'Failed to load jobs',

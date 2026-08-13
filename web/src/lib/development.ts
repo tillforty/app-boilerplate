@@ -230,6 +230,8 @@ export const answerJob = (id: number, answer: string, files: File[] = []) => {
   for (const file of files) form.append('files', file)
   return api.upload<Job>(`/development/jobs/${id}/answer`, form)
 }
+/** Remove a job and its events/attachments. Rejected while it is in flight. */
+export const deleteJob = (id: number) => api.delete<void>(`/development/jobs/${id}`)
 export const retryJob = (id: number) => api.post<Job>(`/development/jobs/${id}/retry`, {})
 export const cancelJob = (id: number) => api.post<Job>(`/development/jobs/${id}/cancel`, {})
 /** Retry an auto-merge that failed; merging is otherwise automatic. */
