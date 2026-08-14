@@ -233,6 +233,19 @@ async def get_secret(pool, name: str) -> str | None:
     )
 
 
+async def set_secret(pool, name: str, value: str) -> None:
+    """Mirror of backend/app/vault.py set_secret — same table, same passphrase."""
+    await pool.execute(
+        """
+        INSERT INTO vault_secrets (name, value)
+        VALUES ($1, pgp_sym_encrypt($2, $3))
+        ON CONFLICT (name)
+        DO UPDATE SET value = pgp_sym_encrypt($2, $3), updated_at = now()
+        """,
+        name, value, VAULT_KEY,
+    )
+
+
 async def event(pool, job_id: int, kind: str, message: str) -> None:
     await pool.execute(
         "INSERT INTO dev_job_events (job_id, kind, message) VALUES ($1, $2, $3)",
@@ -298,11 +311,16 @@ async def load_config(pool):
     return await pool.fetchrow("SELECT * FROM dev_settings WHERE id = 1")
 
 
-async def resolve_agent_key(pool, provider: str) -> str | None:
-    """API key of the credential bound to the development_agent function."""
+async def resolve_agent_key(pool, provider: str) -> tuple[str, str] | None:
+    """(auth_mode, secret) of the credential bound to the development_agent function.
+
+    auth_mode is 'api_key' (a provider API key) or 'subscription' (a Claude plan
+    OAuth token from `claude setup-token`). It decides which environment variable
+    the CLI gets — see agent_env().
+    """
     row = await pool.fetchrow(
         """
-        SELECT c.id FROM ai_function_bindings b
+        SELECT c.id, c.auth_mode FROM ai_function_bindings b
         JOIN llm_credentials c ON c.id = b.credential_id
         WHERE b.function_key = 'development_agent' AND c.provider = $1
         """,
@@ -310,7 +328,24 @@ async def resolve_agent_key(pool, provider: str) -> str | None:
     )
     if row is None:
         return None
-    return await get_secret(pool, f"llm_credential:{row['id']}")
+    secret = await get_secret(pool, f"llm_credential:{row['id']}")
+    if not secret:
+        return None
+    return row["auth_mode"], secret
+
+
+def agent_env(agent: str, auth_mode: str, secret: str) -> dict:
+    """The single credential variable the coding CLI authenticates with.
+
+    Claude Code reads CLAUDE_CODE_OAUTH_TOKEN for subscription auth and
+    ANTHROPIC_API_KEY for API-key auth; Codex only takes an API key (the
+    settings UI offers subscription auth for Anthropic only).
+    """
+    if agent == "claude_code":
+        if auth_mode == "subscription":
+            return {"CLAUDE_CODE_OAUTH_TOKEN": secret}
+        return {"ANTHROPIC_API_KEY": secret}
+    return {"OPENAI_API_KEY": secret}
 
 
 # ── Heartbeat ────────────────────────────────────────────────────────────────
@@ -590,12 +625,13 @@ async def run_job(pool, job) -> None:
         return await fail_job(pool, job_id, "Repository or GitHub token is not configured.")
 
     provider = "anthropic" if job["agent"] == "claude_code" else "openai"
-    api_key = await resolve_agent_key(pool, provider)
-    if not api_key:
+    resolved = await resolve_agent_key(pool, provider)
+    if not resolved:
         return await fail_job(
             pool, job_id,
-            "No API key for the bound development agent. Check Settings › App › AI functions.",
+            "No credential for the bound development agent. Check Settings › App › AI functions.",
         )
+    auth_mode, agent_secret = resolved
 
     workdir = os.path.join(WORKSPACE, f"job-{job_id}")
     shutil.rmtree(workdir, ignore_errors=True)
@@ -651,14 +687,11 @@ async def run_job(pool, job) -> None:
 
         if job["agent"] == "claude_code":
             cmd = ["claude", *CLAUDE_ARGS]
-            if job["model"]:
-                cmd += ["--model", job["model"]]
-            env = {"ANTHROPIC_API_KEY": api_key}
         else:
             cmd = ["codex", *CODEX_ARGS]
-            if job["model"]:
-                cmd += ["--model", job["model"]]
-            env = {"OPENAI_API_KEY": api_key}
+        if job["model"]:
+            cmd += ["--model", job["model"]]
+        env = agent_env(job["agent"], auth_mode, agent_secret)
         if AGENT_DATABASE_URL:
             env["DATABASE_URL"] = AGENT_DATABASE_URL
         cmd.append(prompt)
@@ -876,9 +909,10 @@ async def resolve_conflicts(pool, job, repo: str, token: str, base_branch: str) 
         return False, "The job has no branch, so the conflict can't be resolved."
 
     provider = "anthropic" if job["agent"] == "claude_code" else "openai"
-    api_key = await resolve_agent_key(pool, provider)
-    if not api_key:
-        return False, "No agent API key available to resolve the conflict."
+    resolved = await resolve_agent_key(pool, provider)
+    if not resolved:
+        return False, "No agent credential available to resolve the conflict."
+    auth_mode, agent_secret = resolved
 
     branch = job["branch"]
     workdir = os.path.join(WORKSPACE, f"conflict-{job_id}")
@@ -924,10 +958,9 @@ async def resolve_conflicts(pool, job, repo: str, token: str, base_branch: str) 
         )
         if job["agent"] == "claude_code":
             cmd = ["claude", *CLAUDE_ARGS]
-            env = {"ANTHROPIC_API_KEY": api_key}
         else:
             cmd = ["codex", *CODEX_ARGS]
-            env = {"OPENAI_API_KEY": api_key}
+        env = agent_env(job["agent"], auth_mode, agent_secret)
         if job["model"]:
             cmd += ["--model", job["model"]]
         cmd.append(prompt)
@@ -1227,6 +1260,201 @@ async def reconcile_deployments(pool) -> None:
 
 
 # ── Main loop ────────────────────────────────────────────────────────────────
+# ── Claude subscription sign-in (llm_token_flows) ────────────────────────────
+# The API image has no `claude` CLI, so it can't mint a subscription token; it
+# files a row in llm_token_flows and we drive the CLI here.
+#
+# `claude setup-token` is an interactive TUI: it renders nothing without a
+# terminal, so it runs on a pty. The window is set deliberately wide because the
+# CLI hard-wraps the authorize URL to the terminal width, and a URL split across
+# lines is not a URL. Two waits, both minutes long from the user's side: first
+# the URL appears, then we sit on the prompt until they paste the browser code.
+
+TOKEN_FLOW_POLL = float(os.environ.get("AGENT_TOKEN_FLOW_POLL", "2"))
+TOKEN_FLOW_TTL = float(os.environ.get("AGENT_TOKEN_FLOW_TTL", "900"))  # 15 minutes
+URL_WAIT = 90.0     # seconds to wait for the CLI to print its authorize URL
+TOKEN_WAIT = 240.0  # seconds to wait for the token after the code is pasted
+
+ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07]*\x07|\x1b[()][A-B]")
+AUTHORIZE_RE = re.compile(r"https://\S*/oauth/authorize\S*")
+OAUTH_TOKEN_RE = re.compile(r"sk-ant-oat[0-9A-Za-z_\-]+")
+# The CLI reports a rejected code on the same screen rather than exiting, e.g.
+# "OAuth error: Request failed with status code 400Press Enter to retry." —
+# without this we'd sit there until TOKEN_WAIT and report a useless timeout.
+CLI_ERROR_RE = re.compile(r"(OAuth error:[^\n]{0,200}|Invalid code[^\n]{0,120})")
+# Either outcome ends the wait; which one it was decides success or failure.
+TOKEN_OR_ERROR_RE = re.compile(
+    OAUTH_TOKEN_RE.pattern + "|" + CLI_ERROR_RE.pattern
+)
+
+_flows: dict[int, dict] = {}  # flow id → {"proc": Popen, "fd": int, "buf": str}
+
+
+def _flow_start() -> dict:
+    """Spawn `claude setup-token` on a wide pty. Returns the flow handle."""
+    import fcntl
+    import pty
+    import struct
+    import termios
+
+    master, slave = pty.openpty()
+    # rows, cols, xpixel, ypixel — 1000 columns so the URL stays on one line.
+    fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", 60, 1000, 0, 0))
+    env = {k: v for k, v in os.environ.items() if k in AGENT_ENV_KEEP}
+    env["HOME"] = f"/home/{AGENT_USER}"
+    env["TERM"] = "xterm-256color"
+    env["COLUMNS"] = "1000"
+    proc = subprocess.Popen(
+        ["claude", "setup-token"],
+        stdin=slave, stdout=slave, stderr=slave,
+        env=env, cwd="/tmp", start_new_session=True,
+        user=AGENT_USER, group=AGENT_USER,
+    )
+    os.close(slave)
+    return {"proc": proc, "fd": master, "buf": ""}
+
+
+def _flow_read(flow: dict) -> str:
+    """Drain whatever the pty has ready. Returns the whole buffer, de-ANSI'd."""
+    import select
+
+    while True:
+        ready, _, _ = select.select([flow["fd"]], [], [], 0)
+        if not ready:
+            break
+        try:
+            chunk = os.read(flow["fd"], 65536)
+        except OSError:  # the child closed the pty
+            break
+        if not chunk:
+            break
+        flow["buf"] += chunk.decode("utf-8", "replace")
+    return ANSI_RE.sub("", flow["buf"]).replace("\r", "")
+
+
+async def _flow_await(flow: dict, pattern: re.Pattern, timeout: float) -> str | None:
+    """Poll the pty until `pattern` matches, the child exits, or we time out."""
+    deadline = asyncio.get_event_loop().time() + timeout
+    while asyncio.get_event_loop().time() < deadline:
+        match = pattern.search(_flow_read(flow))
+        if match:
+            return match.group(0)
+        if flow["proc"].poll() is not None:
+            # Child is gone — one last drain in case it printed on the way out.
+            match = pattern.search(_flow_read(flow))
+            return match.group(0) if match else None
+        await asyncio.sleep(0.25)
+    return None
+
+
+def _flow_close(flow_id: int) -> None:
+    flow = _flows.pop(flow_id, None)
+    if not flow:
+        return
+    try:
+        flow["proc"].kill()
+    except Exception:  # noqa: BLE001 — already dead is the common case
+        pass
+    try:
+        os.close(flow["fd"])
+    except OSError:
+        pass
+
+
+async def _flow_fail(pool, flow_id: int, message: str) -> None:
+    _flow_close(flow_id)
+    await pool.execute(
+        "UPDATE llm_token_flows SET state = 'failed', error = $2, updated_at = now() "
+        "WHERE id = $1",
+        flow_id, message[:1000],
+    )
+    log(f"token flow {flow_id} failed: {message}")
+
+
+async def token_flow_tick(pool) -> None:
+    """One pass: start requested sign-ins, finish submitted ones, expire old ones."""
+    for row in await pool.fetch(
+        "SELECT id FROM llm_token_flows WHERE state = 'requested' ORDER BY id"
+    ):
+        flow_id = row["id"]
+        log(f"token flow {flow_id}: starting `claude setup-token`")
+        try:
+            _flows[flow_id] = _flow_start()
+        except Exception as exc:  # noqa: BLE001 — surface the reason to the UI
+            await _flow_fail(pool, flow_id, f"Could not start the Claude CLI: {exc}")
+            continue
+        url = await _flow_await(_flows[flow_id], AUTHORIZE_RE, URL_WAIT)
+        if not url:
+            await _flow_fail(pool, flow_id, "The Claude CLI didn't produce a sign-in URL.")
+            continue
+        await pool.execute(
+            "UPDATE llm_token_flows SET state = 'awaiting_code', url = $2, updated_at = now() "
+            "WHERE id = $1 AND state = 'requested'",
+            flow_id, url,
+        )
+        log(f"token flow {flow_id}: awaiting the browser code")
+
+    for row in await pool.fetch(
+        "SELECT id, code FROM llm_token_flows WHERE state = 'code_submitted' ORDER BY id"
+    ):
+        flow_id = row["id"]
+        flow = _flows.get(flow_id)
+        if flow is None:
+            # We restarted while the user was in the browser; the pty is gone and
+            # the PKCE verifier with it, so the code can't be redeemed.
+            await _flow_fail(pool, flow_id, "The sign-in expired. Generate a new URL.")
+            continue
+        try:
+            # Type the code, then send Enter as a separate write a beat later.
+            # Bundling them means the CR can arrive inside the same paste burst,
+            # which the CLI's input widget swallows along with the pasted text.
+            os.write(flow["fd"], (row["code"] or "").strip().encode())
+            await asyncio.sleep(0.5)
+            os.write(flow["fd"], b"\r")
+        except OSError as exc:
+            await _flow_fail(pool, flow_id, f"Could not hand the code to the CLI: {exc}")
+            continue
+        outcome = await _flow_await(flow, TOKEN_OR_ERROR_RE, TOKEN_WAIT)
+        token = outcome if outcome and outcome.startswith("sk-ant-oat") else None
+        if not token:
+            # Quote the CLI verbatim — its own message ("OAuth error: …") says far
+            # more than we can infer, and a timeout leaves the screen as evidence.
+            screen = " ".join(_flow_read(flow).split())[-400:]
+            await _flow_fail(
+                pool, flow_id,
+                (outcome or "The CLI didn't return a token") + f" — CLI screen: …{screen}",
+            )
+            continue
+        await set_secret(pool, f"llm_token_flow:{flow_id}", token)
+        _flow_close(flow_id)
+        await pool.execute(
+            "UPDATE llm_token_flows SET state = 'done', code = NULL, updated_at = now() "
+            "WHERE id = $1",
+            flow_id,
+        )
+        log(f"token flow {flow_id}: token minted and vaulted")
+
+    for row in await pool.fetch(
+        """
+        SELECT id FROM llm_token_flows
+        WHERE state IN ('requested', 'awaiting_code')
+          AND created_at < now() - ($1 || ' seconds')::interval
+        """,
+        str(int(TOKEN_FLOW_TTL)),
+    ):
+        await _flow_fail(pool, row["id"], "The sign-in timed out. Generate a new URL.")
+
+
+async def token_flow_loop(pool) -> None:
+    """Its own task: a long `run_job` must not stall someone waiting on a URL."""
+    while True:
+        try:
+            await token_flow_tick(pool)
+        except Exception:  # noqa: BLE001 — the loop must outlive any single failure
+            log("token flow error:\n" + traceback.format_exc())
+        await asyncio.sleep(TOKEN_FLOW_POLL)
+
+
 async def main() -> None:
     log("development agent runner starting")
     os.makedirs(WORKSPACE, exist_ok=True)
@@ -1244,6 +1472,15 @@ async def main() -> None:
     log("re-queue on startup: " + await pool.execute(
         "UPDATE dev_deployments SET status = 'pending' WHERE status = 'merging'"
     ))
+    # Sign-ins can't survive a restart: the CLI process holding the PKCE verifier
+    # died with us, so any code the user pastes now would be unredeemable.
+    log("abandon on startup: " + await pool.execute(
+        "UPDATE llm_token_flows SET state = 'failed', "
+        "error = 'The runner restarted. Generate a new URL.', updated_at = now() "
+        "WHERE state IN ('requested', 'awaiting_code', 'code_submitted')"
+    ))
+
+    asyncio.create_task(token_flow_loop(pool))
 
     while True:
         try:

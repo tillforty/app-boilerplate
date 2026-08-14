@@ -16,7 +16,7 @@ export interface Dictionary {
   >
   nav: Record<
     | 'dashboard' | 'customers' | 'documents' | 'components' | 'development' | 'users' | 'roles' | 'appSettings'
-    | 'settings' | 'navigation' | 'profile' | 'apiDocs' | 'signOut' | 'userMenu',
+    | 'operations' | 'settings' | 'navigation' | 'profile' | 'apiDocs' | 'signOut' | 'userMenu',
     string
   >
   customers: {
@@ -129,8 +129,13 @@ export interface Dictionary {
     | 'subtitle' | 'addConnection' | 'editConnection' | 'dialogDesc' | 'loadFailed' | 'saveFailed'
     | 'deleteConfirm' | 'emptyTitle' | 'emptyDesc' | 'keySet' | 'keyUnset' | 'noDefaultModel'
     | 'test' | 'testing' | 'testOk' | 'testFail' | 'provider' | 'label' | 'labelPlaceholder'
-    | 'defaultModel' | 'modelPlaceholder' | 'baseUrl' | 'apiKey' | 'apiKeyPlaceholder'
-    | 'apiKeyKeep' | 'apiKeyHint' | 'functionsSubtitle' | 'functionsNoCreds' | 'connection'
+    | 'defaultModel' | 'baseUrl' | 'authMode' | 'authApiKey' | 'authSubscription'
+    | 'authApiKeyHint' | 'authSubscriptionHint' | 'apiKey' | 'apiKeyPlaceholder'
+    | 'apiKeyKeep' | 'apiKeyHint' | 'token' | 'tokenPlaceholder'
+    | 'signIn' | 'signInHint' | 'generateUrl' | 'generatingUrl' | 'openSignIn'
+    | 'browserCode' | 'browserCodePlaceholder' | 'submitCode' | 'exchanging'
+    | 'tokenReady' | 'signInFailed' | 'pasteInstead' | 'useSignIn'
+    | 'functionsSubtitle' | 'functionsNoCreds' | 'connection'
     | 'connectionNone' | 'noEligibleCreds' | 'model' | 'modelDefaultPlaceholder' | 'saved',
     string
   >
@@ -143,13 +148,26 @@ export interface Dictionary {
     | 'title' | 'subtitle' | 'tabAgent' | 'tabIssues' | 'tabSupport'
     | 'comingSoon' | 'comingSoonHint' | 'noPermission'
     | 'issuesEmpty' | 'issuesEmptyTitle' | 'issuesError' | 'refresh'
+    | 'resolvedEmpty' | 'resolvedEmptyTitle' | 'filterOpen' | 'filterResolved'
     | 'colIssue' | 'colLevel' | 'colEvents' | 'colUsers' | 'colFirstSeen' | 'colLastSeen' | 'colActions' | 'open'
-    | 'prepareJob' | 'viewJob' | 'resolve' | 'resolving' | 'creating' | 'firstSeen'
+    | 'prepareJob' | 'viewJob' | 'resolve' | 'resolving' | 'restore' | 'restoring' | 'creating' | 'firstSeen'
     | 'setupTitle' | 'setupIntro' | 'openGlitchtip' | 'redeployNote'
     | 'issueLoadFailed' | 'issueSeen' | 'issueException' | 'issueStack'
     | 'issueNoStack' | 'issueInApp' | 'issueTags'
     | 'step1Title' | 'step1Desc' | 'step2Title' | 'step2Desc'
     | 'step3Title' | 'step3Desc' | 'step4Title' | 'step4Desc',
+    string
+  >
+  /** Settings › Operations — the n8n execution feed. */
+  operations: Record<
+    | 'title' | 'subtitle' | 'noPermission' | 'loadFailed' | 'refresh' | 'open' | 'openN8n'
+    | 'loadMore' | 'anyStatus' | 'anyWorkflow' | 'unknownWorkflow' | 'retryOf'
+    | 'colWorkflow' | 'colStatus' | 'colMode' | 'colStarted' | 'colDuration' | 'colActions'
+    | 'empty' | 'emptyTitle'
+    | 'setupTitle' | 'setupIntro' | 'redeployNote'
+    | 'step1Title' | 'step1Desc' | 'step2Title' | 'step2Desc'
+    | 'status_success' | 'status_error' | 'status_waiting' | 'status_running'
+    | 'status_canceled' | 'status_new' | 'status_crashed',
     string
   >
   /** Settings › App › Development — repo, token, deploy switch, access checks. */
@@ -221,6 +239,7 @@ export const en: Dictionary = {
     users: 'Users',
     roles: 'Roles',
     appSettings: 'App settings',
+    operations: 'Operations',
     settings: 'Settings',
     navigation: 'Navigation',
     profile: 'Profile',
@@ -459,7 +478,7 @@ export const en: Dictionary = {
     subtitle: 'Provider connections. API keys are stored encrypted and never shown again.',
     addConnection: 'Add connection',
     editConnection: 'Edit connection',
-    dialogDesc: 'Choose a provider, a default model, and paste an API key.',
+    dialogDesc: 'Choose a provider, how it authenticates, a default model, and paste the key.',
     loadFailed: 'Failed to load LLM configuration',
     saveFailed: 'Failed to save',
     deleteConfirm: 'Delete the connection “{label}”? Functions using it will be unbound.',
@@ -476,12 +495,33 @@ export const en: Dictionary = {
     label: 'Name',
     labelPlaceholder: 'e.g. OpenAI (production)',
     defaultModel: 'Default model',
-    modelPlaceholder: 'e.g. gpt-4o or claude-opus-4-8',
     baseUrl: 'Base URL (optional)',
+    authMode: 'Authentication',
+    authApiKey: 'API key',
+    authSubscription: 'Subscription',
+    authApiKeyHint: 'Billed per token against the provider account that owns the key.',
+    authSubscriptionHint:
+      'Uses your Claude plan instead of API billing. Run “claude setup-token” and paste the token. Available to the development agent only — chat and embeddings need an API key.',
     apiKey: 'API key',
     apiKeyPlaceholder: 'Paste the provider API key',
-    apiKeyKeep: 'Leave blank to keep the current key',
+    apiKeyKeep: 'Leave blank to keep the current credential',
     apiKeyHint: 'Stored encrypted in the server vault; never returned to the browser.',
+    token: 'Subscription token',
+    tokenPlaceholder: 'Paste the token from “claude setup-token”',
+    signIn: 'Sign in with your Claude plan',
+    signInHint:
+      'Generates a claude.com sign-in link. Approve it in your browser, paste the code it gives you back here, and the token is stored for you.',
+    generateUrl: 'Generate URL',
+    generatingUrl: 'Generating the sign-in URL…',
+    openSignIn: 'Open the Claude sign-in page',
+    browserCode: 'Code from the browser',
+    browserCodePlaceholder: 'Paste the code shown after approving',
+    submitCode: 'Continue',
+    exchanging: 'Exchanging the code for a token…',
+    tokenReady: 'Signed in — the token is stored. Save to finish.',
+    signInFailed: 'The sign-in failed. Generate a new URL.',
+    pasteInstead: 'Paste a token instead',
+    useSignIn: 'Sign in with the browser instead',
     functionsSubtitle: 'Pick which connection and model each AI feature uses.',
     functionsNoCreds: 'Add a connection in the LLM credentials tab first.',
     connection: 'Connection',
@@ -513,6 +553,10 @@ export const en: Dictionary = {
     noPermission: 'You don’t have permission to view this.',
     issuesEmpty: 'Errors captured from the app will show up here.',
     issuesEmptyTitle: 'No open issues',
+    resolvedEmpty: 'Issues you resolve will show up here and can be restored.',
+    resolvedEmptyTitle: 'No resolved issues',
+    filterOpen: 'Open',
+    filterResolved: 'Resolved',
     issuesError: 'Failed to load issues',
     refresh: 'Refresh',
     colIssue: 'Issue',
@@ -527,6 +571,8 @@ export const en: Dictionary = {
     viewJob: 'View job',
     resolve: 'Resolve',
     resolving: 'Resolving...',
+    restore: 'Restore',
+    restoring: 'Restoring...',
     creating: 'Creating...',
     firstSeen: 'First seen',
     issueLoadFailed: 'Could not load the issue',
@@ -551,6 +597,44 @@ export const en: Dictionary = {
     step4Title: 'Set the org and project slugs',
     step4Desc:
       'Set SENTRY_ORG_SLUG and SENTRY_PROJECT_SLUG in .env (from the project’s URL/settings), then redeploy.',
+  },
+  operations: {
+    title: 'Operations',
+    subtitle: 'Workflow automation runs from n8n — what ran, how it went, how long it took.',
+    noPermission: 'You don’t have permission to view this.',
+    loadFailed: 'Failed to load executions',
+    refresh: 'Refresh',
+    open: 'Open',
+    openN8n: 'Open n8n',
+    loadMore: 'Load more',
+    anyStatus: 'Any status',
+    anyWorkflow: 'Any workflow',
+    unknownWorkflow: 'Deleted workflow',
+    retryOf: 'retry of #{id}',
+    colWorkflow: 'Workflow',
+    colStatus: 'Status',
+    colMode: 'Trigger',
+    colStarted: 'Started',
+    colDuration: 'Duration',
+    colActions: 'Actions',
+    empty: 'Runs of your n8n workflows will show up here.',
+    emptyTitle: 'No executions yet',
+    setupTitle: 'Connect n8n',
+    setupIntro: 'Complete these steps to see workflow executions here:',
+    redeployNote: 'After editing .env, redeploy with ./start.sh.',
+    step1Title: 'Start n8n',
+    step1Desc:
+      'Set N8N_ENABLED=true and N8N_BASE_URL (http://n8n:5678 inside this stack) in .env, then run ./start.sh.',
+    step2Title: 'Provide an API key',
+    step2Desc:
+      'start.sh creates one automatically on first run. To use an existing n8n instead, create a key in n8n (Settings → n8n API) with the execution:read/list and workflow:read/list scopes and set N8N_API_KEY in .env.',
+    status_success: 'Success',
+    status_error: 'Error',
+    status_waiting: 'Waiting',
+    status_running: 'Running',
+    status_canceled: 'Canceled',
+    status_new: 'Queued',
+    status_crashed: 'Crashed',
   },
   devSettings: {
     subtitle:

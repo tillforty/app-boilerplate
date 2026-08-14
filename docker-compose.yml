@@ -177,6 +177,10 @@ services:
       WEBHOOK_URL: ${N8N_WEBHOOK_URL:-http://localhost:5678/}
       GENERIC_TIMEZONE: ${TIMEZONE:-UTC}
       N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:-CHANGE_ME}
+      # n8n marks its auth cookie Secure for any host but localhost, which makes
+      # signing in over plain http impossible. The default here is http on
+      # :5678 — set N8N_SECURE_COOKIE=true once n8n is served over HTTPS.
+      N8N_SECURE_COOKIE: ${N8N_SECURE_COOKIE:-false}
       N8N_BASIC_AUTH_ACTIVE: ${N8N_BASIC_AUTH_ACTIVE:-false}
       N8N_BASIC_AUTH_USER: ${N8N_BASIC_AUTH_USER:-}
       N8N_BASIC_AUTH_PASSWORD: ${N8N_BASIC_AUTH_PASSWORD:-}
@@ -242,8 +246,13 @@ services:
         condition: service_completed_successfully
     volumes:
       - glitchtip_uploads:/code/uploads
+    # Bound to loopback, not 0.0.0.0. This port speaks plain HTTP, so exposing it
+    # publicly puts a login form — and the session cookie behind it — in
+    # cleartext on the internet. Reach GlitchTip over the TLS vhost instead (see
+    # the Caddyfile); this mapping stays for local access and SSH tunnels.
+    # GLITCHTIP_BIND=0.0.0.0 restores the old behaviour for anyone who needs it.
     ports:
-      - "${GLITCHTIP_PORT:-8090}:8080"
+      - "${GLITCHTIP_BIND:-127.0.0.1}:${GLITCHTIP_PORT:-8090}:8080"
 
   glitchtip_worker:
     image: glitchtip/glitchtip:v4.1

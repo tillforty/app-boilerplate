@@ -37,6 +37,64 @@ SENTRY_API_TOKEN = os.environ.get("SENTRY_API_TOKEN", "").strip()
 SENTRY_ORG_SLUG = os.environ.get("SENTRY_ORG_SLUG", "").strip()
 SENTRY_PROJECT_SLUG = os.environ.get("SENTRY_PROJECT_SLUG", "").strip()
 
+# The provisioned GlitchTip admin, used to mint a browser session on demand so
+# an operator isn't asked for a second set of credentials. See sso_cookie().
+_GLITCHTIP_ADMIN_EMAIL = os.environ.get("GLITCHTIP_ADMIN_EMAIL", "").strip()
+_GLITCHTIP_ADMIN_PASSWORD = os.environ.get("GLITCHTIP_ADMIN_PASSWORD", "")
+
+# GlitchTip's session cookie is host-scoped with no Domain attribute, and cookies
+# ignore ports — so a cookie our API sets on this host is sent to GlitchTip on
+# its own port, provided both are served from the same hostname. That is exactly
+# what the TLS vhost arranges, and it is what makes sso_cookie() possible.
+SESSION_COOKIE_NAME = "sessionid"
+
+
+def sso_configured() -> bool:
+    """True when a GlitchTip session can be minted without asking the user."""
+    return bool(_GLITCHTIP_ENABLED and _GLITCHTIP_ADMIN_EMAIL and _GLITCHTIP_ADMIN_PASSWORD)
+
+
+async def sso_cookie() -> str:
+    """Log in to the bundled GlitchTip as the provisioned admin, and return the
+    session id it issues.
+
+    GlitchTip is a separate Django app with its own user table, so there is no
+    shared identity to hand it — this signs in server-side with the credentials
+    the installer generated and passes the resulting session to the browser.
+
+    Everyone allowed through therefore shares that one GlitchTip account. That is
+    the deliberate trade: the endpoint in front of this is admin-gated, and the
+    alternative is every operator holding a second password.
+
+    Uses the allauth *headless* API, which needs a CSRF token first — the login
+    POST is rejected 403 without one.
+    """
+    if not sso_configured():
+        raise RuntimeError("GlitchTip single sign-on is not configured (admin credentials missing).")
+
+    import httpx
+
+    base = _api_base()
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        # Any headless endpoint issues the CSRF cookie; the session probe answers
+        # 401 while signed out, which is fine — we only want the cookie.
+        await client.get(f"{base}/_allauth/browser/v1/auth/session")
+        headers = {"Content-Type": "application/json"}
+        csrf = client.cookies.get("csrftoken")
+        if csrf:
+            headers["X-CSRFToken"] = csrf
+        resp = await client.post(
+            f"{base}/_allauth/browser/v1/auth/login",
+            json={"email": _GLITCHTIP_ADMIN_EMAIL, "password": _GLITCHTIP_ADMIN_PASSWORD},
+            headers=headers,
+        )
+        resp.raise_for_status()
+        session = client.cookies.get(SESSION_COOKIE_NAME)
+
+    if not session:
+        raise RuntimeError("GlitchTip accepted the sign-in but issued no session cookie.")
+    return session
+
 
 def is_configured() -> bool:
     """True when a DSN is set, i.e. the backend will actually send events."""
@@ -264,9 +322,9 @@ async def fetch_issues(query: str | None = None, limit: int = 50) -> list[dict]:
     return issues
 
 
-async def resolve_issue(issue_id: str) -> None:
-    """Mark an issue as resolved in GlitchTip/Sentry. Raises when unconfigured
-    or when the API call fails.
+async def set_issue_status(issue_id: str, new_status: str) -> None:
+    """Set an issue's status in GlitchTip/Sentry ("resolved" or "unresolved").
+    Raises when unconfigured or when the API call fails.
 
     Note the URL is organization-scoped, not project-scoped like the read paths:
     the project-scoped issue URL has no PUT handler (it answers 405), and the
@@ -283,7 +341,17 @@ async def resolve_issue(issue_id: str) -> None:
     async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.put(
             url,
-            json={"status": "resolved"},
+            json={"status": new_status},
             headers={"Authorization": f"Bearer {SENTRY_API_TOKEN}"},
         )
         resp.raise_for_status()
+
+
+async def resolve_issue(issue_id: str) -> None:
+    """Mark an issue as resolved."""
+    await set_issue_status(issue_id, "resolved")
+
+
+async def unresolve_issue(issue_id: str) -> None:
+    """Restore a resolved issue back to the open list."""
+    await set_issue_status(issue_id, "unresolved")

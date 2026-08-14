@@ -76,6 +76,10 @@ export const listIssues = (query?: string, limit = 50) => {
 export const resolveIssue = (issueId: string) =>
   api.post<void>(`/development/issues/${issueId}/resolve`, {})
 
+/** Put a resolved issue back on the open list. */
+export const unresolveIssue = (issueId: string) =>
+  api.post<void>(`/development/issues/${issueId}/unresolve`, {})
+
 export const createJobFromIssue = (issueId: string) =>
   api.post<Job>(`/development/issues/${issueId}/job`, {})
 

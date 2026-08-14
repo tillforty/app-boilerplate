@@ -17,6 +17,7 @@ const ComponentsPage = lazy(() => import('@/pages/ComponentsPage'))
 const UsersPage = lazy(() => import('@/pages/UsersPage'))
 const RolesPage = lazy(() => import('@/pages/RolesPage'))
 const SettingsPage = lazy(() => import('@/pages/SettingsPage'))
+const OperationsPage = lazy(() => import('@/pages/OperationsPage'))
 const ProfilePage = lazy(() => import('@/pages/ProfilePage'))
 const DocumentsPage = lazy(() => import('@/pages/DocumentsPage'))
 const DevelopmentPage = lazy(() => import('@/pages/DevelopmentPage'))
@@ -79,6 +80,7 @@ export default function App() {
           <Route path="/settings/users" element={<UsersPage />} />
           <Route path="/settings/roles" element={<RolesPage />} />
           <Route path="/settings/app" element={<SettingsPage />} />
+          <Route path="/settings/operations" element={<OperationsPage />} />
         </Route>
       </Route>
     </Routes>

@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
-from . import ai, customers, db, demo, devagent, development, files, llmconfig, oauth, observability, roles, settings, stats, vault, vectors
+from . import ai, customers, db, demo, devagent, development, files, llmconfig, oauth, observability, operations, roles, settings, stats, vault, vectors
 from .auth import ensure_schema_and_seed, router as auth_router
 from .ratelimit import limiter
 
@@ -72,6 +72,7 @@ app.include_router(customers.router)
 app.include_router(development.router)
 app.include_router(devagent.router)
 app.include_router(llmconfig.router)
+app.include_router(operations.router)
 # Register your app-specific routers here.
 
 

@@ -9,6 +9,7 @@ import {
   getIssue,
   listIssues,
   resolveIssue,
+  unresolveIssue,
   createJobFromIssue,
   type DevSetupStatus,
   type Issue,
@@ -42,6 +43,11 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import AgentTab from '@/components/development/AgentTab'
+
+/** Link-outs to the error tracker go through the API rather than straight to its
+ *  URL: that endpoint signs in server-side and attaches the session, so the
+ *  tracker opens on its dashboard instead of its own login form. */
+const GLITCHTIP_OPEN_URL = '/api/development/glitchtip/open'
 
 const TABS = ['agent', 'issues', 'support'] as const
 type Tab = (typeof TABS)[number]
@@ -119,7 +125,7 @@ function SetupChecklist({ setup }: { setup: DevSetupStatus }) {
             <Button
               type="button"
               variant="outline"
-              onClick={() => window.open(setup.ui_url!, '_blank', 'noopener,noreferrer')}
+              onClick={() => window.open(GLITCHTIP_OPEN_URL, '_blank', 'noopener,noreferrer')}
             >
               {t('development.openGlitchtip')}
               <ExternalLink className="ml-2 h-4 w-4" />
@@ -132,15 +138,19 @@ function SetupChecklist({ setup }: { setup: DevSetupStatus }) {
   )
 }
 
-/** The live issue list — same table styling as the app's other data tables. */
+/** The live issue list — same table styling as the app's other data tables.
+ *  Open and resolved issues are both loaded; the toggle picks which set the
+ *  table shows, and a resolved issue can be restored back to the open list. */
 function IssuesList({
   issues,
+  resolvedIssues,
   onRefresh,
   uiUrl,
   onOpen,
   onOpenJob,
 }: {
   issues: Issue[]
+  resolvedIssues: Issue[]
   onRefresh: () => void
   uiUrl: string | null
   onOpen: (id: string) => void
@@ -153,6 +163,8 @@ function IssuesList({
   const canSeeJobs = can('development:read')
   const [creatingJobId, setCreatingJobId] = useState<string | null>(null)
   const [resolvingId, setResolvingId] = useState<string | null>(null)
+  const [showResolved, setShowResolved] = useState(false)
+  const rows = showResolved ? resolvedIssues : issues
 
   const handleCreateJob = async (issueId: string) => {
     try {
@@ -166,13 +178,15 @@ function IssuesList({
     }
   }
 
-  const handleResolveIssue = async (issueId: string) => {
+  /** Resolve an open issue, or restore a resolved one — same button slot, and
+   *  either way the lists are reloaded so the row moves to the other set. */
+  const handleSetResolved = async (issueId: string, resolved: boolean) => {
     try {
       setResolvingId(issueId)
-      await resolveIssue(issueId)
+      await (resolved ? resolveIssue(issueId) : unresolveIssue(issueId))
       onRefresh()
     } catch (error) {
-      console.error('Failed to resolve issue:', error)
+      console.error('Failed to update issue status:', error)
     } finally {
       setResolvingId(null)
     }
@@ -181,12 +195,30 @@ function IssuesList({
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-end gap-2">
+        <div className="mr-auto flex items-center gap-1 rounded-md border p-1">
+          <Button
+            type="button"
+            variant={showResolved ? 'ghost' : 'secondary'}
+            size="sm"
+            onClick={() => setShowResolved(false)}
+          >
+            {t('development.filterOpen')} ({issues.length})
+          </Button>
+          <Button
+            type="button"
+            variant={showResolved ? 'secondary' : 'ghost'}
+            size="sm"
+            onClick={() => setShowResolved(true)}
+          >
+            {t('development.filterResolved')} ({resolvedIssues.length})
+          </Button>
+        </div>
         {uiUrl && (
           <Button
             type="button"
             variant="outline"
             size="sm"
-            onClick={() => window.open(uiUrl, '_blank', 'noopener,noreferrer')}
+            onClick={() => window.open(GLITCHTIP_OPEN_URL, '_blank', 'noopener,noreferrer')}
           >
             {t('development.openGlitchtip')}
             <ExternalLink className="ml-2 h-4 w-4" />
@@ -211,15 +243,19 @@ function IssuesList({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {issues.length === 0 ? (
+            {rows.length === 0 ? (
               <TableEmptyState
                 colSpan={7}
                 icon={CheckCircle2}
-                title={t('development.issuesEmptyTitle')}
-                description={t('development.issuesEmpty')}
+                title={t(
+                  showResolved ? 'development.resolvedEmptyTitle' : 'development.issuesEmptyTitle',
+                )}
+                description={t(
+                  showResolved ? 'development.resolvedEmpty' : 'development.issuesEmpty',
+                )}
               />
             ) : (
-              issues.map((it) => (
+              rows.map((it) => (
                 <TableRow key={it.id}>
                   <TableCell className="max-w-md">
                     <button
@@ -282,17 +318,21 @@ function IssuesList({
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
                           <DropdownMenuItem
-                            onClick={() => handleResolveIssue(it.id)}
+                            onClick={() => handleSetResolved(it.id, !showResolved)}
                             disabled={resolvingId === it.id}
                           >
                             {resolvingId === it.id
-                              ? t('development.resolving')
-                              : t('development.resolve')}
+                              ? t(showResolved ? 'development.restoring' : 'development.resolving')
+                              : t(showResolved ? 'development.restore' : 'development.resolve')}
                           </DropdownMenuItem>
                           {it.web_url && (
                             <DropdownMenuItem
                               onClick={() =>
-                                window.open(it.web_url!, '_blank', 'noopener,noreferrer')
+                                window.open(
+                                  `${GLITCHTIP_OPEN_URL}?to=${encodeURIComponent(it.web_url!)}`,
+                                  '_blank',
+                                  'noopener,noreferrer',
+                                )
                               }
                             >
                               {t('development.open')}
@@ -321,6 +361,7 @@ function IssuesTab({
   error,
   setup,
   issues,
+  resolvedIssues,
   onRefresh,
   onOpenJob,
 }: {
@@ -329,6 +370,7 @@ function IssuesTab({
   error: string | null
   setup: DevSetupStatus | null
   issues: Issue[] | null
+  resolvedIssues: Issue[] | null
   onRefresh: () => void
   onOpenJob: (jobId: number) => void
 }) {
@@ -370,6 +412,7 @@ function IssuesTab({
       )}
       <IssuesList
         issues={issues ?? []}
+        resolvedIssues={resolvedIssues ?? []}
         onRefresh={onRefresh}
         uiUrl={setup?.ui_url ?? null}
         onOpen={openIssue}
@@ -519,6 +562,7 @@ export default function DevelopmentPage() {
 
   const [setup, setSetup] = useState<DevSetupStatus | null>(null)
   const [issues, setIssues] = useState<Issue[] | null>(null)
+  const [resolvedIssues, setResolvedIssues] = useState<Issue[] | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [reloadKey, setReloadKey] = useState(0)
@@ -536,10 +580,19 @@ export default function DevelopmentPage() {
         if (!active) return
         setSetup(s)
         if (s.api_configured) {
-          const list = await listIssues()
-          if (active) setIssues(list.issues)
+          // Both sets are fetched up front so the open/resolved toggle switches
+          // instantly and the tab badge always counts the open ones.
+          const [open, resolved] = await Promise.all([
+            listIssues('is:unresolved'),
+            listIssues('is:resolved'),
+          ])
+          if (active) {
+            setIssues(open.issues)
+            setResolvedIssues(resolved.issues)
+          }
         } else {
           setIssues(null)
+          setResolvedIssues(null)
         }
       })
       .catch((e) => {
@@ -590,6 +643,7 @@ export default function DevelopmentPage() {
             error={error}
             setup={setup}
             issues={issues}
+            resolvedIssues={resolvedIssues}
             onRefresh={() => setReloadKey((k) => k + 1)}
             onOpenJob={onOpenJob}
           />

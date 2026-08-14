@@ -7,12 +7,13 @@ import {
   listFunctions,
   setFunctionBinding,
   modelsFor,
+  withCurrentModel,
+  credentialServes,
   type Provider,
   type Credential,
   type FunctionBinding,
 } from '@/lib/llm'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -63,14 +64,20 @@ export default function AiFunctionsTab() {
     [providers],
   )
 
-  // Credentials eligible for a capability = those whose provider supports it.
+  // Credentials eligible for a capability = those whose provider supports it and
+  // whose auth mode can serve it (a subscription token only drives coding agents).
   function eligibleCreds(capability: FunctionBinding['capability']): Credential[] {
-    return creds.filter((c) => providerByKey[c.provider]?.capabilities.includes(capability))
+    return creds.filter((c) => credentialServes(c, providerByKey[c.provider], capability))
   }
 
-  function modelOptionsFor(fn: FunctionBinding, credId: number | null): string[] {
+  function modelOptionsFor(
+    fn: FunctionBinding,
+    credId: number | null,
+    current: string,
+  ): string[] {
     const cred = creds.find((c) => c.id === credId)
-    return modelsFor(cred ? providerByKey[cred.provider] : undefined, fn.capability)
+    const models = modelsFor(cred ? providerByKey[cred.provider] : undefined, fn.capability)
+    return withCurrentModel(models, current)
   }
 
   async function onSave(fn: FunctionBinding) {
@@ -115,7 +122,7 @@ export default function AiFunctionsTab() {
       {functions.map((fn) => {
         const draft = drafts[fn.key] ?? { credential_id: null, model: '' }
         const options = eligibleCreds(fn.capability)
-        const models = modelOptionsFor(fn, draft.credential_id)
+        const models = modelOptionsFor(fn, draft.credential_id, draft.model)
         return (
           <Card key={fn.key}>
             <CardHeader className="pb-2">
@@ -161,24 +168,28 @@ export default function AiFunctionsTab() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor={`model-${fn.key}`}>{t('llm.model')}</Label>
-                  <Input
-                    id={`model-${fn.key}`}
-                    list={`models-${fn.key}`}
-                    value={draft.model}
+                  <Select
+                    value={draft.model || NONE}
                     disabled={draft.credential_id === null}
-                    placeholder={t('llm.modelDefaultPlaceholder')}
-                    onChange={(e) =>
+                    onValueChange={(v) =>
                       setDrafts((prev) => ({
                         ...prev,
-                        [fn.key]: { ...draft, model: e.target.value },
+                        [fn.key]: { ...draft, model: v === NONE ? '' : v },
                       }))
                     }
-                  />
-                  <datalist id={`models-${fn.key}`}>
-                    {models.map((m) => (
-                      <option key={m} value={m} />
-                    ))}
-                  </datalist>
+                  >
+                    <SelectTrigger id={`model-${fn.key}`}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={NONE}>{t('llm.modelDefaultPlaceholder')}</SelectItem>
+                      {models.map((m) => (
+                        <SelectItem key={m} value={m}>
+                          {m}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
               <div className="flex items-center gap-3">

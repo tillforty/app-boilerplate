@@ -7,6 +7,7 @@ shows a setup checklist built from GET /development/setup.
 """
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
 from . import db, devagent, observability
@@ -92,6 +93,52 @@ async def get_setup(
     return DevSetupStatus(**observability.setup_status())
 
 
+@router.get("/glitchtip/open")
+async def open_glitchtip(
+    to: str | None = Query(default=None, description="Deep link within the tracker UI"),
+    _: UserOut = Depends(require_permission("roles:manage")),
+) -> RedirectResponse:
+    """Land in the GlitchTip dashboard without a second login.
+
+    Mints a session server-side and sets it on this host. GlitchTip runs on
+    another port of the same hostname and cookies ignore ports, so the browser
+    presents it on arrival and the dashboard opens signed in.
+    """
+    base = observability.ui_url()
+    if not base:
+        raise HTTPException(status.HTTP_409_CONFLICT, "No error-tracker UI is configured.")
+
+    # `to` lets a caller deep-link to one issue. It is checked against the known
+    # UI origin rather than trusted: this endpoint attaches a live session, so an
+    # unvalidated redirect would hand that session to whatever host was asked for.
+    target = base
+    if to:
+        if not to.startswith(base.rstrip("/") + "/"):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Destination is outside the tracker UI.")
+        target = to
+    if not observability.sso_configured():
+        # Nothing to sign in with — send them to the login form rather than 500.
+        return RedirectResponse(target, status_code=status.HTTP_303_SEE_OTHER)
+
+    try:
+        session = await observability.sso_cookie()
+    except (RuntimeError, httpx.HTTPError):
+        return RedirectResponse(target, status_code=status.HTTP_303_SEE_OTHER)
+
+    resp = RedirectResponse(target, status_code=status.HTTP_303_SEE_OTHER)
+    resp.set_cookie(
+        observability.SESSION_COOKIE_NAME,
+        session,
+        path="/",
+        httponly=True,
+        samesite="lax",
+        # Only mark Secure when the destination is HTTPS; a Secure cookie would
+        # simply be dropped on a plain-HTTP install.
+        secure=target.startswith("https://"),
+    )
+    return resp
+
+
 async def _jobs_by_issue(issue_ids: list[str]) -> dict[str, dict]:
     """Newest job per issue id, for the issues that have one.
 
@@ -153,6 +200,31 @@ async def resolve_issue(
     """Resolve an issue in GlitchTip."""
     try:
         await observability.resolve_issue(issue_id)
+    except RuntimeError as e:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            str(e),
+        ) from e
+    except httpx.HTTPStatusError as exc:
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            f"Error tracker returned {exc.response.status_code}.",
+        ) from exc
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY,
+            f"Could not reach the error tracker: {exc}",
+        ) from exc
+
+
+@router.post("/issues/{issue_id}/unresolve", status_code=status.HTTP_204_NO_CONTENT)
+async def unresolve_issue(
+    issue_id: str,
+    _: UserOut = Depends(require_permission("roles:manage")),
+) -> None:
+    """Restore a resolved issue — it moves back to the open list in GlitchTip."""
+    try:
+        await observability.unresolve_issue(issue_id)
     except RuntimeError as e:
         raise HTTPException(
             status.HTTP_409_CONFLICT,

@@ -334,6 +334,75 @@ if [ "${GLITCHTIP_ENABLED_VAL:-false}" = "true" ] && [ -z "${SENTRY_DSN_VAL:-}" 
 fi
 
 N8N_PORT_VAL="$(grep -E '^N8N_PORT=' .env | cut -d= -f2 || true)"; N8N_PORT_VAL="${N8N_PORT_VAL:-5678}"
+
+# ── n8n auto-provisioning (first run) ────────────────────────────────────────
+# When n8n is enabled but no API key is stored yet, create the owner account and
+# a read-only public-API key, and write it into .env — so Settings › Operations
+# lists executions on the first run with nothing to click. Set
+# N8N_AUTOPROVISION=false to opt out (e.g. when pointing at an existing n8n).
+N8N_PW_SHOW=""
+if [ "${N8N_ENABLED:-false}" = "true" ]; then
+  # Browser-facing URL for the "open in n8n" links — the API base is the
+  # in-network service name, which a browser can't resolve.
+  N8N_PUBLIC_URL_VAL="$(grep -E '^N8N_PUBLIC_URL=' .env | cut -d= -f2- || true)"
+  if [ -z "${N8N_PUBLIC_URL_VAL:-}" ]; then
+    if [ -n "${DOMAIN:-}" ]; then
+      set_env N8N_PUBLIC_URL "http://${DOMAIN}:${N8N_PORT_VAL}"
+    else
+      set_env N8N_PUBLIC_URL "http://localhost:${N8N_PORT_VAL}"
+    fi
+  fi
+
+  N8N_API_KEY_VAL="$(grep -E '^N8N_API_KEY=' .env | cut -d= -f2- || true)"
+  N8N_AUTOPROV_VAL="$(grep -E '^N8N_AUTOPROVISION=' .env | cut -d= -f2 || true)"
+  if [ -z "${N8N_API_KEY_VAL:-}" ] && [ "${N8N_AUTOPROV_VAL:-true}" != "false" ]; then
+    info "n8n is enabled but has no API key — provisioning…"
+
+    # The app reaches n8n over the compose network; the published port is only
+    # there for the browser.
+    N8N_BASE_URL_VAL="$(grep -E '^N8N_BASE_URL=' .env | cut -d= -f2- || true)"
+    if [ -z "${N8N_BASE_URL_VAL:-}" ]; then
+      N8N_BASE_URL_VAL="http://n8n:5678"
+      set_env N8N_BASE_URL "$N8N_BASE_URL_VAL"
+    fi
+
+    N8N_OWNER_EMAIL_VAL="$(grep -E '^N8N_OWNER_EMAIL=' .env | cut -d= -f2- || true)"
+    if [ -z "${N8N_OWNER_EMAIL_VAL:-}" ]; then
+      N8N_OWNER_EMAIL_VAL="$(grep -E '^SEED_USER_EMAIL=' .env | cut -d= -f2 || true)"
+      [ -z "$N8N_OWNER_EMAIL_VAL" ] && N8N_OWNER_EMAIL_VAL="$(grep -E '^ACME_EMAIL=' .env | cut -d= -f2 || true)"
+      [ -n "$N8N_OWNER_EMAIL_VAL" ] && set_env N8N_OWNER_EMAIL "$N8N_OWNER_EMAIL_VAL"
+    fi
+    N8N_OWNER_PW_VAL="$(grep -E '^N8N_OWNER_PASSWORD=' .env | cut -d= -f2- || true)"
+    if [ -z "${N8N_OWNER_PW_VAL:-}" ]; then
+      # n8n rejects passwords without a capital and a digit.
+      N8N_OWNER_PW_VAL="Tf$(gen 8)A9"; N8N_PW_SHOW="$N8N_OWNER_PW_VAL"
+      set_env N8N_OWNER_PASSWORD "$N8N_OWNER_PW_VAL"
+    fi
+
+    n8n_out=""
+    if [ -n "$N8N_OWNER_EMAIL_VAL" ]; then
+      # Runs from the api container: it has httpx and sits on n8n's network.
+      $DC cp scripts/n8n_provision.py api:/tmp/tf_n8n_provision.py >/dev/null 2>&1 || true
+      n8n_out="$($DC exec -T \
+        -e N8N_INTERNAL_URL="$N8N_BASE_URL_VAL" \
+        -e N8N_OWNER_EMAIL="$N8N_OWNER_EMAIL_VAL" \
+        -e N8N_OWNER_PASSWORD="$N8N_OWNER_PW_VAL" \
+        api python /tmp/tf_n8n_provision.py 2>/dev/null || true)"
+    else
+      warn "No email available for the n8n owner account; skipping (set N8N_OWNER_EMAIL)."
+    fi
+
+    if printf '%s' "$n8n_out" | grep -q '__TF_N8N__'; then
+      set_env N8N_API_KEY "$(printf '%s' "$n8n_out" | grep -E '^API_KEY=' | head -1 | cut -d= -f2-)"
+      ok "n8n provisioned (owner ${N8N_OWNER_EMAIL_VAL}, read-only API key stored)."
+      info "Reloading the API so Settings › Operations picks up the key…"
+      $DC up -d --force-recreate api >/dev/null 2>&1 || true
+    else
+      warn "n8n auto-provision didn't complete; the Settings › Operations checklist will guide manual setup."
+    fi
+  fi
+fi
+
 if [ -n "${DOMAIN:-}" ]; then
   cat <<EOF
 
@@ -353,12 +422,26 @@ else
 EOF
 fi
 if [ "${N8N_ENABLED:-false}" = "true" ]; then
-  printf '  n8n:        http://localhost:%s\n\n' "$N8N_PORT_VAL"
+  N8N_PUBLIC_URL_SHOW="$(grep -E '^N8N_PUBLIC_URL=' .env | cut -d= -f2- || true)"
+  printf '  n8n:        %s\n' "${N8N_PUBLIC_URL_SHOW:-http://localhost:$N8N_PORT_VAL}"
+  printf '              (its runs are listed in the app under Settings › Operations)\n'
+  if [ -n "${N8N_PW_SHOW:-}" ]; then
+    N8N_OWNER_SHOW="$(grep -E '^N8N_OWNER_EMAIL=' .env | cut -d= -f2- || true)"
+    printf '  n8n owner (generated): %s / %s   (saved in .env, shown once)\n' "$N8N_OWNER_SHOW" "$N8N_PW_SHOW"
+  fi
+  printf '\n'
 fi
 GLITCHTIP_PORT_VAL="$(grep -E '^GLITCHTIP_PORT=' .env | cut -d= -f2 || true)"; GLITCHTIP_PORT_VAL="${GLITCHTIP_PORT_VAL:-8090}"
 GLITCHTIP_DOMAIN_SHOW="$(grep -E '^GLITCHTIP_DOMAIN=' .env | cut -d= -f2- || true)"
 if [ "${GLITCHTIP_ENABLED:-false}" = "true" ]; then
-  printf '  GlitchTip:  %s   (ensure port %s is open on the host firewall)\n' "${GLITCHTIP_DOMAIN_SHOW:-http://localhost:$GLITCHTIP_PORT_VAL}" "$GLITCHTIP_PORT_VAL"
+  GLITCHTIP_BIND_VAL="$(grep -E '^GLITCHTIP_BIND=' .env | cut -d= -f2 || true)"; GLITCHTIP_BIND_VAL="${GLITCHTIP_BIND_VAL:-127.0.0.1}"
+  printf '  GlitchTip:  %s\n' "${GLITCHTIP_DOMAIN_SHOW:-http://localhost:$GLITCHTIP_PORT_VAL}"
+  if [ "$GLITCHTIP_BIND_VAL" = "127.0.0.1" ]; then
+    printf '              (port %s is bound to loopback — reach it over the TLS\n' "$GLITCHTIP_PORT_VAL"
+    printf '               address above, or tunnel: ssh -L %s:127.0.0.1:%s <host>)\n' "$GLITCHTIP_PORT_VAL" "$GLITCHTIP_PORT_VAL"
+  else
+    printf '              (port %s is published on %s in cleartext HTTP)\n' "$GLITCHTIP_PORT_VAL" "$GLITCHTIP_BIND_VAL"
+  fi
   if [ -n "${GT_PW_SHOW:-}" ]; then
     printf '  GlitchTip admin (generated): %s / %s   (saved in .env, shown once)\n' "$GT_ADMIN_EMAIL" "$GT_PW_SHOW"
   fi

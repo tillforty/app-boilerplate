@@ -7,10 +7,15 @@ setup). Embeddings are OpenAI-compatible only — Anthropic has no embeddings AP
 
   operating_agent → OpenAI chat completions OR Anthropic messages
   embeddings      → OpenAI embeddings (or any OpenAI-compatible endpoint)
+
+Subscription connections (Claude plan OAuth tokens) never resolve here —
+llmconfig.resolve() filters them out because the SDK paths below need a real
+API key. They only drive the headless coding CLI in agent-runner/runner.py.
 """
 import os
 from functools import lru_cache
 
+import httpx
 from openai import AsyncOpenAI
 
 from . import llmconfig
@@ -129,12 +134,43 @@ async def complete(
 
 
 # ── Connection test (used by the Settings LLM tab) ───────────────────────────
+ANTHROPIC_API_BASE = "https://api.anthropic.com"
+
+
+async def _test_subscription(api_key: str, base_url: str | None) -> tuple[bool, str | None]:
+    """Liveness check for a Claude subscription token. Subscription tokens are
+    bearer tokens, not `x-api-key` keys, so the SDK client can't be used —
+    hit the Models endpoint directly the way the CLIs authenticate."""
+    url = f"{(base_url or ANTHROPIC_API_BASE).rstrip('/')}/v1/models"
+    async with httpx.AsyncClient(timeout=15) as client:
+        res = await client.get(
+            url,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "anthropic-version": "2023-06-01",
+                "anthropic-beta": "oauth-2025-04-20",
+            },
+        )
+    if res.status_code == 200:
+        return True, None
+    return False, f"HTTP {res.status_code}: {res.text[:300]}"
+
+
 async def test_credential(
-    *, provider: str, api_key: str, base_url: str | None, model: str | None
+    *,
+    provider: str,
+    api_key: str,
+    base_url: str | None,
+    model: str | None,
+    auth_mode: str = "api_key",
 ) -> tuple[bool, str | None]:
     """Cheap liveness check for a stored credential. Uses the provider's Models
     API (no token cost). Returns (ok, error_message)."""
     try:
+        if auth_mode == "subscription":
+            if provider != "anthropic":
+                return False, f"Provider '{provider}' has no subscription authentication."
+            return await _test_subscription(api_key, base_url)
         if provider == "anthropic":
             client = _anthropic_client(api_key, base_url)
             await client.models.list()
