@@ -43,8 +43,8 @@ def create_access_token(subject: str) -> str:
     now = dt.datetime.now(dt.timezone.utc)
     payload = {
         "sub": subject,
-        "iat": now,
-        "exp": now + dt.timedelta(minutes=JWT_EXPIRE_MINUTES),
+        "iat": int(now.timestamp()),
+        "exp": int((now + dt.timedelta(minutes=JWT_EXPIRE_MINUTES)).timestamp()),
     }
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALG)
 
