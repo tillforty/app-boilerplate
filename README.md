@@ -781,6 +781,24 @@ Pin to a release tag instead of `main` for stability — change the registry URL
 
 ---
 
+## Tests
+
+Both suites run in CI (`.github/workflows/tests.yml`) on every PR. Locally:
+
+```bash
+# Backend — unit/endpoint tests, no database needed (Postgres is faked)
+cd backend
+pip install -r requirements.txt -r requirements-dev.txt
+python -m pytest
+
+# Frontend — typecheck + vitest
+cd web
+npm ci
+npx tsc -b && npm test
+```
+
+---
+
 ## Maintaining this repo
 
 The `registry/*` files are the canonical source. After editing them, rebuild the
