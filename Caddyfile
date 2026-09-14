@@ -44,3 +44,22 @@
 	encode gzip
 	reverse_proxy glitchtip:8080
 }
+
+# n8n over TLS on the SAME hostname, reusing the certificate Caddy already holds
+# for {$DOMAIN} — same reasoning as the GlitchTip block above (a certificate is
+# bound to the name, not the port), so no extra DNS record is needed.
+#
+# Why this exists: n8n itself speaks plain http on 5678. Any browser with
+# HTTPS-only mode, or an HSTS entry picked up from {$DOMAIN}, silently upgrades
+# http://{$DOMAIN}:5678 to https:// — which a plain-http listener cannot answer,
+# so the UI reads as "not reachable" while the container is perfectly healthy.
+#
+# Caddy owns the public :5678 here, so n8n's own publish is moved to a
+# loopback-only port (N8N_BIND in .env) to avoid a bind conflict. Keep
+# N8N_PUBLIC_URL, N8N_WEBHOOK_URL and N8N_PROTOCOL in step with this address.
+{$DOMAIN}:5678 {
+	{$CADDY_TLS}
+	encode gzip
+	# n8n's editor UI uses websockets for push; reverse_proxy upgrades them natively.
+	reverse_proxy n8n:5678
+}
