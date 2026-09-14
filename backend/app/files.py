@@ -39,25 +39,6 @@ class FileType(str, Enum):
 
 
 # Postgres has no CREATE TYPE IF NOT EXISTS, so the enum is created with a guard.
-CREATE_SCHEMA = """
-DO $$ BEGIN
-    CREATE TYPE file_type AS ENUM ('document', 'image', 'other');
-EXCEPTION
-    WHEN duplicate_object THEN NULL;
-END $$;
-
-CREATE TABLE IF NOT EXISTS files (
-    id           bigserial PRIMARY KEY,
-    name         text NOT NULL,
-    type         file_type NOT NULL DEFAULT 'other',
-    storage_path text NOT NULL,
-    created_at   timestamptz NOT NULL DEFAULT now()
-);
-
-ALTER TABLE files ADD COLUMN IF NOT EXISTS type file_type NOT NULL DEFAULT 'other';
-"""
-
-
 # ── Storage backends ──────────────────────────────────────────────────────────
 
 class StorageBackend(ABC):
@@ -159,10 +140,11 @@ class FileOut(BaseModel):
 
 
 async def ensure_schema() -> None:
+    """Create the local storage directory. The `files` table and its file_type
+    enum are owned by migrations/0003_files.sql, applied by the `migrate` service
+    before this container starts."""
     if STORAGE_TYPE == "local":
         STORAGE_DIR.mkdir(parents=True, exist_ok=True)
-    async with db.get_pool().acquire() as conn:
-        await conn.execute(CREATE_SCHEMA)
 
 
 async def save_upload(name: str, data: bytes, file_type: FileType = FileType.other) -> dict:

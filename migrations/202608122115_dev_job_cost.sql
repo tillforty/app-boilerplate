@@ -10,11 +10,19 @@
 -- but keeping it visible is how "this branch went stale" stops being invisible.
 --
 -- First migration on the timestamp convention (YYYYMMDDHHMM_) — see README. It
--- sorts after the historical 0001-0014 files, and can't collide with a number a
+-- sorts after the historical 0001-0016 files, and can't collide with a number a
 -- fork happens to pick next.
 
+-- migrate:up
 ALTER TABLE dev_jobs ADD COLUMN IF NOT EXISTS cost_usd          numeric(12,6) NOT NULL DEFAULT 0;
 ALTER TABLE dev_jobs ADD COLUMN IF NOT EXISTS merge_cost_usd    numeric(12,6) NOT NULL DEFAULT 0;
 ALTER TABLE dev_jobs ADD COLUMN IF NOT EXISTS input_tokens      bigint        NOT NULL DEFAULT 0;
 ALTER TABLE dev_jobs ADD COLUMN IF NOT EXISTS output_tokens     bigint        NOT NULL DEFAULT 0;
 ALTER TABLE dev_jobs ADD COLUMN IF NOT EXISTS cache_read_tokens bigint        NOT NULL DEFAULT 0;
+
+-- migrate:down
+ALTER TABLE dev_jobs DROP COLUMN IF EXISTS cache_read_tokens;
+ALTER TABLE dev_jobs DROP COLUMN IF EXISTS output_tokens;
+ALTER TABLE dev_jobs DROP COLUMN IF EXISTS input_tokens;
+ALTER TABLE dev_jobs DROP COLUMN IF EXISTS merge_cost_usd;
+ALTER TABLE dev_jobs DROP COLUMN IF EXISTS cost_usd;

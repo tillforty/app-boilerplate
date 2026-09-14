@@ -15,8 +15,8 @@
 -- i.e. it needs a human, rather than "ready to ship".
 --
 -- A row in dev_deployments is now a RELEASE covering many jobs, not one PR.
--- Mirrored idempotently by devagent.ensure_schema().
 
+-- migrate:up
 -- Jobs remember which release shipped them.
 ALTER TABLE dev_jobs ADD COLUMN IF NOT EXISTS release_id bigint
     REFERENCES dev_deployments(id) ON DELETE SET NULL;
@@ -39,6 +39,8 @@ ALTER TABLE dev_deployments ADD COLUMN IF NOT EXISTS job_count integer NOT NULL 
 
 -- Backfill: number the historical deployments in the order they happened, and
 -- attribute each one's job to it so the history stays complete.
+-- Under the ledger these run exactly once, so the WHERE guards below are belt
+-- and braces rather than the load-bearing correctness they used to be.
 WITH numbered AS (
     SELECT id, row_number() OVER (ORDER BY created_at, id) AS n FROM dev_deployments
 )
@@ -60,3 +62,23 @@ WHERE status = 'deployed' AND merged_at IS NULL;
 -- A failed auto-merge leaves the PR open and needs a human nudge; this is the
 -- flag the "Retry merge" action sets for the runner to pick up.
 ALTER TABLE dev_jobs ADD COLUMN IF NOT EXISTS merge_requested boolean NOT NULL DEFAULT false;
+
+-- migrate:down
+-- 'merged' disappears from the vocabulary, so any job parked there has to move.
+-- 'deployment_ready' is where it would have sat under the pre-0013 flow: work
+-- finished, waiting on a human to ship it.
+UPDATE dev_jobs SET status = 'deployment_ready' WHERE status = 'merged';
+
+ALTER TABLE dev_jobs DROP CONSTRAINT IF EXISTS dev_jobs_status_check;
+ALTER TABLE dev_jobs ADD CONSTRAINT dev_jobs_status_check CHECK (
+    status IN ('pending', 'running', 'answer_pending',
+               'deployment_ready', 'deploying', 'deployed', 'failed', 'cancelled')
+);
+
+ALTER TABLE dev_deployments DROP COLUMN IF EXISTS job_count;
+ALTER TABLE dev_deployments DROP COLUMN IF EXISTS release_number;
+
+DROP INDEX IF EXISTS dev_jobs_release_idx;
+ALTER TABLE dev_jobs DROP COLUMN IF EXISTS merge_requested;
+ALTER TABLE dev_jobs DROP COLUMN IF EXISTS merged_at;
+ALTER TABLE dev_jobs DROP COLUMN IF EXISTS release_id;

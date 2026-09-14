@@ -6,6 +6,7 @@
 -- Postgres has no CREATE TYPE IF NOT EXISTS, so the enum is created inside a
 -- guarded DO block. Extend the enum per app with: ALTER TYPE file_type ADD VALUE '...'.
 
+-- migrate:up
 DO $$ BEGIN
     CREATE TYPE file_type AS ENUM ('document', 'image', 'other');
 EXCEPTION
@@ -22,3 +23,7 @@ CREATE TABLE IF NOT EXISTS files (
 
 -- Backfill `type` on tables created before this column existed.
 ALTER TABLE files ADD COLUMN IF NOT EXISTS type file_type NOT NULL DEFAULT 'other';
+
+-- migrate:down
+DROP TABLE IF EXISTS files;
+DROP TYPE IF EXISTS file_type;

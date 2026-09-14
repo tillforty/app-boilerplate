@@ -8,7 +8,9 @@
 --
 -- The runner writes them into .agent/attachments/ inside its throw-away
 -- workspace, which is excluded from git, so an attachment never lands in a
--- commit. Mirrored idempotently by devagent.ensure_schema().
+-- commit.
+
+-- migrate:up
 CREATE TABLE IF NOT EXISTS dev_job_files (
     id         bigserial PRIMARY KEY,
     job_id     bigint NOT NULL REFERENCES dev_jobs(id) ON DELETE CASCADE,
@@ -21,3 +23,6 @@ CREATE TABLE IF NOT EXISTS dev_job_files (
 );
 
 CREATE INDEX IF NOT EXISTS dev_job_files_job_idx ON dev_job_files (job_id, id);
+
+-- migrate:down
+DROP TABLE IF EXISTS dev_job_files;

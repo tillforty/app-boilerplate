@@ -41,43 +41,7 @@ LOGO_MAX_BYTES = 2 * 1024 * 1024  # 2 MiB
 VALID_LANGUAGES = {"en", "lt"}
 _AVAILABLE_TZ = zoneinfo.available_timezones()
 
-CREATE_SCHEMA = """
-CREATE TABLE IF NOT EXISTS app_settings (
-    id               smallint PRIMARY KEY DEFAULT 1 CHECK (id = 1),
-    onboarded        boolean     NOT NULL DEFAULT false,
-    app_name         text        NOT NULL DEFAULT 'Tillforty',
-    default_language text        NOT NULL DEFAULT 'en',
-    currency_code    text        NOT NULL DEFAULT 'EUR',
-    currency_symbol  text        NOT NULL DEFAULT '€',
-    timezone         text        NOT NULL DEFAULT 'Europe/Vilnius',
-    demo_mode        boolean     NOT NULL DEFAULT false,
-    from_name        text        NOT NULL DEFAULT '',
-    from_email       text        NOT NULL DEFAULT '',
-    support_email    text        NOT NULL DEFAULT '',
-    logo             bytea,
-    logo_mime        text,
-    updated_at       timestamptz NOT NULL DEFAULT now()
-);
-"""
-
 # Idempotent self-heal for databases created before this module existed.
-_ALTERS = [
-    "ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS onboarded boolean NOT NULL DEFAULT false",
-    "ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS app_name text NOT NULL DEFAULT 'Tillforty'",
-    "ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS default_language text NOT NULL DEFAULT 'en'",
-    "ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS currency_code text NOT NULL DEFAULT 'EUR'",
-    "ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS currency_symbol text NOT NULL DEFAULT '€'",
-    "ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS timezone text NOT NULL DEFAULT 'Europe/Vilnius'",
-    "ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS demo_mode boolean NOT NULL DEFAULT false",
-    "ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS from_name text NOT NULL DEFAULT ''",
-    "ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS from_email text NOT NULL DEFAULT ''",
-    "ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS support_email text NOT NULL DEFAULT ''",
-    "ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS logo bytea",
-    "ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS logo_mime text",
-    "ALTER TABLE app_settings ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now()",
-]
-
-
 # ── Synchronous cache (for the mailer + demo, which can't await the pool) ──────
 _CACHE: dict = {"from_name": "", "from_email": "", "demo_mode": False, "onboarded": False}
 
@@ -190,14 +154,15 @@ def _to_public(row) -> PublicSettings:
 
 
 async def ensure_schema_and_seed() -> None:
-    """Create app_settings, seed the singleton row, apply the DB timezone, and
-    warm the sync cache. Runs after roles (admin upsert needs the roles table)
-    and before demo (demo seeding now reads app_settings.demo_mode)."""
+    """Seed the app_settings singleton, apply the DB timezone, and warm the sync
+    cache. The table is owned by migrations/0010_app_settings.sql — including the
+    onboarded-on-upgrade heuristic, which must stay in the migration because it
+    depends on running before any user is seeded.
+
+    Runs after roles (admin upsert needs the roles table) and before demo (demo
+    seeding reads app_settings.demo_mode)."""
     pool = db.get_pool()
     async with pool.acquire() as conn:
-        await conn.execute(CREATE_SCHEMA)
-        for stmt in _ALTERS:
-            await conn.execute(stmt)
         await conn.execute("INSERT INTO app_settings (id) VALUES (1) ON CONFLICT (id) DO NOTHING")
         row = await conn.fetchrow("SELECT * FROM app_settings WHERE id = 1")
         _refresh_cache(row)

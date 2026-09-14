@@ -7,4 +7,9 @@
 --   ALTER TABLE my_table ADD COLUMN embedding vector(1536);
 --   CREATE INDEX ON my_table USING hnsw (embedding vector_cosine_ops);
 
+-- migrate:up
 CREATE EXTENSION IF NOT EXISTS vector;
+
+-- migrate:down
+-- 0007's down must run first: dropping this takes every vector column with it.
+DROP EXTENSION IF EXISTS vector;

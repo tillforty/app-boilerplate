@@ -22,18 +22,6 @@ from .ratelimit import limiter
 router = APIRouter(prefix="/auth", tags=["auth"])
 _bearer = HTTPBearer(auto_error=False)
 
-CREATE_USERS_TABLE = """
-CREATE TABLE IF NOT EXISTS users (
-    id            bigserial PRIMARY KEY,
-    name          text NOT NULL,
-    surname       text NOT NULL,
-    email         text NOT NULL UNIQUE,
-    password_hash text NOT NULL,
-    created_at    timestamptz NOT NULL DEFAULT now()
-);
-"""
-
-
 class LoginRequest(BaseModel):
     email: str
     password: str
@@ -138,19 +126,14 @@ def _send_invite_email(to: str, name: str, url: str) -> None:
 
 
 async def ensure_schema_and_seed() -> None:
-    """Create the users table if missing and seed the initial user once."""
+    """Seed the initial user once, from SEED_USER_* env vars.
+
+    The `users` table is owned by migrations/0002_users.sql + 0008_user_lifecycle.sql.
+    The `migrate` service applies those before this container is allowed to start
+    (docker-compose depends_on: service_completed_successfully), so there is no
+    schema to create here."""
     pool = db.get_pool()
     async with pool.acquire() as conn:
-        await conn.execute(CREATE_USERS_TABLE)
-        # Lifecycle columns (canonical DDL in migrations/0008_user_lifecycle.sql);
-        # idempotent so pre-migration databases self-heal on startup.
-        await conn.execute("ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL")
-        await conn.execute(
-            "ALTER TABLE users ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'active'"
-        )
-        await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS invite_token text UNIQUE")
-        await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS invited_at timestamptz")
-
         email = os.environ.get("SEED_USER_EMAIL")
         password = os.environ.get("SEED_USER_PASSWORD")
         if email and password:

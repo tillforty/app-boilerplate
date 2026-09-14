@@ -8,7 +8,13 @@
 -- Two SYSTEM roles are seeded and must not be deletable (enforced in the API):
 --   administrator — permissions ['*'] (can do anything; locked)
 --   member        — a limited demo set (editable)
+--
+-- The seeds below are the historical set. roles.ensure_schema_and_seed() runs on
+-- every API start and is the live owner of system-role contents (it also grants
+-- member 'customers:read'); this file is not edited to match — that is what the
+-- later migration would be for.
 
+-- migrate:up
 CREATE TABLE IF NOT EXISTS roles (
     id          bigserial PRIMARY KEY,
     name        text NOT NULL UNIQUE,
@@ -35,3 +41,7 @@ ON CONFLICT (name) DO UPDATE SET is_system = true;
 UPDATE users
 SET role_id = (SELECT id FROM roles WHERE name = 'administrator')
 WHERE role_id IS NULL;
+
+-- migrate:down
+ALTER TABLE users DROP COLUMN IF EXISTS role_id;
+DROP TABLE IF EXISTS roles;

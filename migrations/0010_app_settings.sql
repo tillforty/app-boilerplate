@@ -4,6 +4,7 @@
 -- changed at runtime instead of being baked in at build time. Secrets
 -- (SMTP/Resend credentials, JWT, DB, encryption keys) stay in .env — never here.
 
+-- migrate:up
 CREATE TABLE IF NOT EXISTS app_settings (
     id               smallint PRIMARY KEY DEFAULT 1 CHECK (id = 1),
     onboarded        boolean     NOT NULL DEFAULT false,
@@ -28,3 +29,6 @@ CREATE TABLE IF NOT EXISTS app_settings (
 INSERT INTO app_settings (id, onboarded)
 VALUES (1, (SELECT count(*) > 0 FROM users))
 ON CONFLICT (id) DO NOTHING;
+
+-- migrate:down
+DROP TABLE IF EXISTS app_settings;

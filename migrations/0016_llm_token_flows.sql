@@ -6,6 +6,8 @@
 -- drives `claude setup-token` in a pty, writes back the authorize URL, and — once
 -- the user pastes the browser code — stores the minted token in the vault under
 -- 'llm_token_flow:{id}'. The token itself is never a column here.
+
+-- migrate:up
 CREATE TABLE IF NOT EXISTS llm_token_flows (
     id         bigserial PRIMARY KEY,
     state      text NOT NULL DEFAULT 'requested'
@@ -18,3 +20,6 @@ CREATE TABLE IF NOT EXISTS llm_token_flows (
 );
 
 CREATE INDEX IF NOT EXISTS llm_token_flows_state_idx ON llm_token_flows (state, created_at);
+
+-- migrate:down
+DROP TABLE IF EXISTS llm_token_flows;

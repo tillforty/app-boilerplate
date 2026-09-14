@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
-from . import ai, customers, db, demo, devagent, development, files, llmconfig, oauth, observability, operations, roles, settings, stats, vault, vectors
+from . import ai, customers, db, demo, devagent, development, files, llmconfig, oauth, observability, operations, roles, settings, stats, vault
 from .auth import ensure_schema_and_seed, router as auth_router
 from .ratelimit import limiter
 
@@ -28,23 +28,21 @@ async def lifespan(app: FastAPI):
     """Startup/shutdown: connect the pool and run the schema bootstrap in order,
     then release the pool on shutdown. (Replaces the deprecated @app.on_event.)"""
     await db.connect(DATABASE_URL)
+    # The schema itself is applied by the `migrate` service, which must exit
+    # successfully before this container is started (see docker-compose.yml
+    # depends_on: service_completed_successfully). Everything below is seeding
+    # and runtime bootstrap, still ordered by its data dependencies.
     await ensure_schema_and_seed()
-    # roles must run after auth: it ALTERs/backfills the users table.
+    # roles must run after auth: it backfills the seeded user's role.
     await roles.ensure_schema_and_seed()
     # settings must run after roles (admin upsert needs the roles table) and
     # before demo (demo seeding now reads app_settings.demo_mode).
     await settings.ensure_schema_and_seed()
     # demo must run after roles: it seeds the demo user with the member role.
     await demo.ensure_demo_user()
-    await vault.ensure_schema()
-    # llmconfig stores API keys in the vault, so it must run after vault.
-    await llmconfig.ensure_schema()
-    # devagent stores the GitHub token in the vault and binds an llmconfig
-    # function, so it must run after both.
-    await devagent.ensure_schema()
+    # Creates STORAGE_DIR on local-disk installs; no DB work.
     await files.ensure_schema()
-    await vectors.ensure_schema()
-    # customers must run after vectors: it declares a pgvector embedding column.
+    # Warns if the deployed embedding width disagrees with EMBEDDING_DIM.
     await customers.ensure_schema()
     yield
     await db.disconnect()

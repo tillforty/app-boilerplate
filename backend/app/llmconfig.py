@@ -110,54 +110,6 @@ def _flow_vault_name(flow_id: int) -> str:
     return f"llm_token_flow:{flow_id}"
 
 
-async def ensure_schema() -> None:
-    """Idempotent mirror of migrations/0011_llm.sql + 0015_llm_auth_mode.sql."""
-    async with db.get_pool().acquire() as conn:
-        await conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS llm_credentials (
-                id            bigserial PRIMARY KEY,
-                provider      text NOT NULL CHECK (provider IN ('openai', 'anthropic')),
-                label         text NOT NULL,
-                base_url      text,
-                default_model text,
-                auth_mode     text NOT NULL DEFAULT 'api_key',
-                has_key       boolean NOT NULL DEFAULT false,
-                created_at    timestamptz NOT NULL DEFAULT now(),
-                updated_at    timestamptz NOT NULL DEFAULT now()
-            );
-            -- Added after 0011; present here so a code deploy works before migrations run.
-            ALTER TABLE llm_credentials
-                ADD COLUMN IF NOT EXISTS auth_mode text NOT NULL DEFAULT 'api_key';
-            ALTER TABLE llm_credentials
-                DROP CONSTRAINT IF EXISTS llm_credentials_auth_mode_check;
-            ALTER TABLE llm_credentials
-                ADD CONSTRAINT llm_credentials_auth_mode_check
-                CHECK (auth_mode IN ('api_key', 'subscription'));
-            CREATE TABLE IF NOT EXISTS ai_function_bindings (
-                function_key  text PRIMARY KEY,
-                credential_id bigint REFERENCES llm_credentials(id) ON DELETE SET NULL,
-                model         text,
-                updated_at    timestamptz NOT NULL DEFAULT now()
-            );
-            -- Canonical DDL: migrations/0016_llm_token_flows.sql.
-            CREATE TABLE IF NOT EXISTS llm_token_flows (
-                id         bigserial PRIMARY KEY,
-                state      text NOT NULL DEFAULT 'requested'
-                           CHECK (state IN ('requested', 'awaiting_code',
-                                            'code_submitted', 'done', 'failed')),
-                url        text,
-                code       text,
-                error      text,
-                created_at timestamptz NOT NULL DEFAULT now(),
-                updated_at timestamptz NOT NULL DEFAULT now()
-            );
-            CREATE INDEX IF NOT EXISTS llm_token_flows_state_idx
-                ON llm_token_flows (state, created_at);
-            """
-        )
-
-
 # ── Resolution (consumed by llm.py) ──────────────────────────────────────────
 @dataclass
 class ResolvedModel:
