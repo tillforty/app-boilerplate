@@ -38,35 +38,36 @@ services:
       timeout: 5s
       retries: 10
 
-  # ── One-shot SQL migrations (run in filename order, then exit) ───────────
+  # ── Versioned SQL migrations (dbmate; baseline → apply, then exit) ───────
+  # Every applied file is recorded in a `schema_migrations` ledger, so each one
+  # runs EXACTLY ONCE and each runs inside its own transaction — a failure rolls
+  # that migration back whole instead of leaving half of it applied. Before this,
+  # the runner re-executed every .sql file on every boot, which is why the older
+  # files are all written idempotently.
+  #
+  # scripts/db_migrate.sh decides between three paths on startup (fresh /
+  # baseline an existing pre-dbmate database / replay) and guards against two
+  # branches claiming the same version number.
   migrate:
-    image: postgres:16-alpine
+    image: ghcr.io/amacneil/dbmate:2
     restart: "no"
     env_file: .env
     depends_on:
       postgres:
         condition: service_healthy
+    environment:
+      DBMATE_MIGRATIONS_DIR: /db/migrations
+      MIGRATIONS_DIR: /db/migrations
+      # dbmate talks to Postgres through lib/pq, which defaults to sslmode=require
+      # and would refuse the plaintext link to the postgres container. Set here
+      # rather than in DATABASE_URL so that overriding the entrypoint — e.g.
+      # `docker compose run --rm --entrypoint dbmate migrate ... down` — still
+      # connects without anyone having to remember the query parameter.
+      PGSSLMODE: ${PGSSLMODE:-disable}
     volumes:
-      - ./migrations:/migrations:ro
-    entrypoint: ["sh", "-c"]
-    command:
-      - |
-        set -e
-        # Byte order, not locale order, so every host applies the same sequence.
-        export LC_ALL=C
-        # Two lineages adding a migration on the same number is the classic fork
-        # hazard: both files apply, in an order nobody chose. Refuse to guess.
-        dupes="$$(basename -a /migrations/*.sql | cut -d_ -f1 | sort | uniq -d)"
-        if [ -n "$$dupes" ]; then
-          echo "Duplicate migration prefixes — rename one side: $$dupes" >&2
-          exit 1
-        fi
-        echo "Running migrations in order against $$DATABASE_URL"
-        for f in /migrations/*.sql; do
-          echo "→ applying $$f"
-          psql "$$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$$f"
-        done
-        echo "Migrations complete."
+      - ./migrations:/db/migrations:ro
+      - ./scripts/db_migrate.sh:/db/db_migrate.sh:ro
+    entrypoint: ["sh", "/db/db_migrate.sh"]
 
   # ── FastAPI backend ──────────────────────────────────────────────────────
   api:

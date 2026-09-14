@@ -168,7 +168,7 @@ On first run this:
 1. Creates `.env` from `.env.example` and **auto-generates** the database password,
    `JWT_SECRET`, `VAULT_KEY`, and the seed admin password (printed once).
 2. Builds the images and starts the services in order:
-   **Postgres → migrations (run in filename order) → API → web**.
+   **Postgres → migrations (dbmate, applied once each) → API → web**.
 3. Waits for the API's `/ready` check, then prints the URLs + admin login.
 
 | Service | URL (default ports) |
@@ -332,7 +332,7 @@ app-boilerplate/
 │  ├─ app/{db,security,auth,oauth,roles,vault,files,vectors,llm,main}.py
 │  ├─ requirements.txt
 │  └─ .env.example
-└─ migrations/          # SQL — run in filename order, idempotent
+└─ migrations/          # SQL — versioned by dbmate, applied once each
    ├─ 0001_extensions.sql
    ├─ 0002_users.sql
    ├─ 0003_files.sql
@@ -345,28 +345,57 @@ app-boilerplate/
 
 ## Database / SQL migration
 
-Run the migrations **in filename order** against your app's Postgres database. The
-backend also creates these tables idempotently on startup (`ensure_schema*`), so
-the files double as documentation of the canonical schema.
+Migrations are versioned with [dbmate](https://github.com/amacneil/dbmate). The
+`migrate` service applies any pending file and exits; `api` and `agent_runner`
+only start once it has exited successfully, so the schema is always in place
+before application code runs.
+
+Every applied file is recorded in a **`schema_migrations` ledger**, which means
+each migration runs **exactly once** and each runs **inside its own
+transaction** — a failure rolls that file back whole instead of leaving a
+half-applied schema behind.
 
 ```bash
-# all of them, in order
-LC_ALL=C
-for f in migrations/*.sql; do
-  psql "$DATABASE_URL" -f "$f"
-done
+# what the compose service runs
+dbmate up        # apply everything pending
+dbmate status    # what is applied / pending
+dbmate down      # roll back the most recent migration
 ```
 
-**Naming new migrations.** The `0001`–`0014` files are historical. Anything you
-add from here on gets a **timestamp** prefix instead — `YYYYMMDDHHMM_name.sql`,
-e.g. `202608121530_add_invoices.sql`. Timestamps sort after the numbered files
-and, unlike a counter, two people (or a client fork and this boilerplate) can
-never pick the same one. The `migrate` service refuses to start if two files
-share a prefix, rather than applying both in an order nobody chose.
+**File format.** Each file declares both directions:
 
-Every migration must be **idempotent** — `CREATE TABLE IF NOT EXISTS`, `ADD
-COLUMN IF NOT EXISTS`, and so on. There is no ledger of what has been applied;
-the whole directory replays on every boot.
+```sql
+-- migrate:up
+ALTER TABLE invoices ADD COLUMN paid_at timestamptz;
+
+-- migrate:down
+ALTER TABLE invoices DROP COLUMN paid_at;
+```
+
+**Naming new migrations.** The `0001`–`0016` files are historical. Anything you
+add from here on gets a **timestamp** prefix — `YYYYMMDDHHMM_name.sql`, e.g.
+`202608121530_add_invoices.sql`. Timestamps sort after the numbered files and,
+unlike a counter, two people (or a client fork and this boilerplate) can never
+pick the same one. `scripts/db_migrate.sh` refuses to start if two files share a
+version, rather than recording one and silently skipping the other forever.
+
+**Idempotency is no longer required.** The historical files are all written with
+`CREATE TABLE IF NOT EXISTS` / `ADD COLUMN IF NOT EXISTS` because the old runner
+replayed the whole directory on every boot. With the ledger, a new migration runs
+once and may safely contain data backfills, `UPDATE`s, and destructive DDL.
+
+**Upgrading an existing database.** `scripts/db_migrate.sh` detects a pre-dbmate
+install and picks one of three paths, logging which:
+
+| Path | When | What happens |
+| --- | --- | --- |
+| fresh | no `users` table | every migration is applied from `0001` |
+| baseline | pre-dbmate and fully migrated | the 17 cutover migrations are recorded as applied **without running** |
+| replay | pre-dbmate but behind the cutover | everything is applied; safe because the cutover-era files are idempotent |
+
+The baseline list is hardcoded in the script on purpose — deriving it from the
+directory would mark a migration added *after* the cutover as applied without
+ever running it.
 
 Dependency order matters: `0001` enables `pgcrypto` (needed by the vault in
 `0004`); `0002` creates `users` (referenced by anything you add that ties rows to

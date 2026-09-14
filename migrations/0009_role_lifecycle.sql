@@ -4,4 +4,8 @@
 -- already have it, but marks it so the UI can dim it and stop offering it for
 -- new assignments. System roles (administrator, member) stay active.
 
+-- migrate:up
 ALTER TABLE roles ADD COLUMN IF NOT EXISTS is_active boolean NOT NULL DEFAULT true;
+
+-- migrate:down
+ALTER TABLE roles DROP COLUMN IF EXISTS is_active;

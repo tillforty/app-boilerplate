@@ -4,6 +4,8 @@
 --                 headless Claude Code CLI (CLAUDE_CODE_OAUTH_TOKEN)
 -- The secret itself still lives in the encrypted vault under
 -- 'llm_credential:{id}' — only the mode is recorded here.
+
+-- migrate:up
 ALTER TABLE llm_credentials
     ADD COLUMN IF NOT EXISTS auth_mode text NOT NULL DEFAULT 'api_key';
 
@@ -13,3 +15,7 @@ ALTER TABLE llm_credentials
 ALTER TABLE llm_credentials
     ADD CONSTRAINT llm_credentials_auth_mode_check
     CHECK (auth_mode IN ('api_key', 'subscription'));
+
+-- migrate:down
+ALTER TABLE llm_credentials DROP CONSTRAINT IF EXISTS llm_credentials_auth_mode_check;
+ALTER TABLE llm_credentials DROP COLUMN IF EXISTS auth_mode;

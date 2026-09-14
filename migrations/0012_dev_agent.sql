@@ -5,8 +5,9 @@
 --           → deploying → deployed        (or failed / cancelled at any point)
 --
 -- Secrets (the GitHub token) live in vault_secrets under 'dev_agent:github_token',
--- never in these tables. Mirrored idempotently by devagent.ensure_schema().
+-- never in these tables.
 
+-- migrate:up
 -- ── Repo configuration (singleton, like app_settings) ───────────────────────
 CREATE TABLE IF NOT EXISTS dev_settings (
     id             smallint PRIMARY KEY DEFAULT 1 CHECK (id = 1),
@@ -99,3 +100,9 @@ CREATE TABLE IF NOT EXISTS dev_deployments (
 );
 
 CREATE INDEX IF NOT EXISTS dev_deployments_created_idx ON dev_deployments (created_at DESC);
+
+-- migrate:down
+DROP TABLE IF EXISTS dev_deployments;
+DROP TABLE IF EXISTS dev_job_events;
+DROP TABLE IF EXISTS dev_jobs;
+DROP TABLE IF EXISTS dev_settings;

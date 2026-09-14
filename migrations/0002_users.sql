@@ -3,6 +3,7 @@
 -- plaintext, never reversible). Login issues a JWT (see backend/app/security.py).
 -- The first user is seeded from SEED_USER_* env vars on API startup.
 
+-- migrate:up
 CREATE TABLE IF NOT EXISTS users (
     id            bigserial PRIMARY KEY,
     name          text NOT NULL,
@@ -11,3 +12,6 @@ CREATE TABLE IF NOT EXISTS users (
     password_hash text NOT NULL,
     created_at    timestamptz NOT NULL DEFAULT now()
 );
+
+-- migrate:down
+DROP TABLE IF EXISTS users;

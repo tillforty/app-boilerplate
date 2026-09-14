@@ -73,27 +73,30 @@ def _to_customer(row: asyncpg.Record) -> Customer:
 
 
 async def ensure_schema() -> None:
-    """Create the customers table (idempotent). Runs after vectors.ensure_schema
-    so the `vector` type exists."""
-    async with db.get_pool().acquire() as conn:
-        await conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS customers (
-                id         bigserial PRIMARY KEY,
-                name       text NOT NULL,
-                company    text NOT NULL DEFAULT '',
-                email      text NOT NULL,
-                status     text NOT NULL DEFAULT 'lead'
-                           CHECK (status IN ('active','trial','churned','lead')),
-                mrr        integer NOT NULL DEFAULT 0,
-                seats      integer NOT NULL DEFAULT 0,
-                embedding  vector(%d),
-                created_at timestamptz NOT NULL DEFAULT now()
-            );
-            CREATE INDEX IF NOT EXISTS customers_embedding_idx
-                ON customers USING hnsw (embedding vector_cosine_ops);
-            """
-            % vectors.EMBEDDING_DIM
+    """Warn if the deployed embedding width disagrees with EMBEDDING_DIM.
+
+    The `customers` table is owned by migrations/0007_customers.sql, which pins
+    vector(1536) — the default EMBEDDING_DIM (text-embedding-3-small). This used
+    to CREATE TABLE with vector(EMBEDDING_DIM), but that only ever took effect on
+    a database where the migration had not already made the table, so overriding
+    EMBEDDING_DIM silently produced a column of the wrong width. Say so instead:
+    an override needs its own migration."""
+    deployed = await db.get_pool().fetchval(
+        """
+        SELECT format_type(a.atttypid, a.atttypmod)
+        FROM pg_attribute a
+        WHERE a.attrelid = 'customers'::regclass
+          AND a.attname = 'embedding'
+          AND NOT a.attisdropped
+        """
+    )
+    expected = f"vector({vectors.EMBEDDING_DIM})"
+    if deployed and deployed != expected:
+        logger.warning(
+            "customers.embedding is %s but EMBEDDING_DIM expects %s — semantic "
+            "search will fail on write. Add a migration to ALTER the column.",
+            deployed,
+            expected,
         )
 
 

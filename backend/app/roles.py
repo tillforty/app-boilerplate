@@ -42,31 +42,24 @@ PERMISSION_CATALOG: list[dict] = [
 
 ALL_PERMISSIONS = {f"{g['resource']}:{a}" for g in PERMISSION_CATALOG for a in g["actions"]}
 
-CREATE_SCHEMA = """
-CREATE TABLE IF NOT EXISTS roles (
-    id          bigserial PRIMARY KEY,
-    name        text NOT NULL UNIQUE,
-    description text NOT NULL DEFAULT '',
-    permissions text[] NOT NULL DEFAULT '{}',
-    is_system   boolean NOT NULL DEFAULT false,
-    created_at  timestamptz NOT NULL DEFAULT now()
-);
-ALTER TABLE users ADD COLUMN IF NOT EXISTS role_id bigint REFERENCES roles(id);
-"""
-
-
 async def ensure_schema_and_seed() -> None:
-    """Create the roles table, seed the two system roles, link users.role_id.
+    """Seed the two system roles and link any roleless user to administrator.
 
-    Must run AFTER auth.ensure_schema_and_seed (it ALTERs and backfills `users`).
+    The `roles` table and users.role_id are owned by migrations/0006_roles.sql +
+    0009_role_lifecycle.sql. The seeds below stay in code so a system role is
+    re-created if it is ever deleted, and so administrator is re-locked to ['*']
+    on every boot.
+
+    NOTE: the member list here includes 'customers:read', but 0006 already
+    inserted the row with three permissions and this upsert only touches
+    is_system — so on any migrated database member does NOT get it. That
+    predates the dbmate cutover. Granting it means a migration that UPDATEs the
+    row: widening a role's permissions is a deliberate security change, not
+    something to slip in as a seed.
+
+    Must run AFTER auth.ensure_schema_and_seed (which seeds the first user).
     """
     async with db.get_pool().acquire() as conn:
-        await conn.execute(CREATE_SCHEMA)
-        # Lifecycle column (canonical DDL in migrations/0009_role_lifecycle.sql);
-        # added here too so a fresh code deploy works even before migrations run.
-        await conn.execute(
-            "ALTER TABLE roles ADD COLUMN IF NOT EXISTS is_active boolean NOT NULL DEFAULT true"
-        )
         # Administrator is always locked to ['*'].
         await conn.execute(
             """

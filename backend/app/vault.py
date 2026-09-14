@@ -26,22 +26,6 @@ if not VAULT_KEY:
 
 router = APIRouter(prefix="/vault", tags=["vault"])
 
-CREATE_SCHEMA = """
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
-CREATE TABLE IF NOT EXISTS vault_secrets (
-    name       text PRIMARY KEY,
-    value      bytea NOT NULL,
-    created_at timestamptz NOT NULL DEFAULT now(),
-    updated_at timestamptz NOT NULL DEFAULT now()
-);
-"""
-
-
-async def ensure_schema() -> None:
-    async with db.get_pool().acquire() as conn:
-        await conn.execute(CREATE_SCHEMA)
-
-
 async def set_secret(name: str, value: str) -> None:
     await db.get_pool().execute(
         """

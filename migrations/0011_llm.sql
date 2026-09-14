@@ -4,9 +4,8 @@
 -- vault_secrets (pgcrypto pgp_sym_encrypt, see 0004_vault.sql) under the name
 -- 'llm_credential:'||id. `has_key` mirrors whether that secret exists, so the
 -- UI can show configured/unconfigured without decrypting anything.
---
--- Idempotent mirror lives in backend/app/llmconfig.py ensure_schema().
 
+-- migrate:up
 CREATE TABLE IF NOT EXISTS llm_credentials (
     id            bigserial PRIMARY KEY,
     provider      text NOT NULL CHECK (provider IN ('openai', 'anthropic')),
@@ -27,3 +26,7 @@ CREATE TABLE IF NOT EXISTS ai_function_bindings (
     model         text,
     updated_at    timestamptz NOT NULL DEFAULT now()
 );
+
+-- migrate:down
+DROP TABLE IF EXISTS ai_function_bindings;
+DROP TABLE IF EXISTS llm_credentials;

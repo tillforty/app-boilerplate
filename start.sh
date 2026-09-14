@@ -253,7 +253,8 @@ esac
 info "Building images and starting the stack (Postgres → migrations → API → web)…"
 $DC up -d --build
 
-# Wait for the API to report ready (it also runs schema self-seed on startup).
+# Wait for the API to report ready (it seeds users/roles/settings on startup;
+# the schema itself was applied by the migrate service before it booted).
 ready=0
 if command -v curl >/dev/null 2>&1; then
   info "Waiting for the API to become ready…"

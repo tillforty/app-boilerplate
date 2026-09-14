@@ -13,14 +13,6 @@ from . import db
 
 EMBEDDING_DIM = int(os.environ.get("EMBEDDING_DIM", "1536"))
 
-CREATE_SCHEMA = "CREATE EXTENSION IF NOT EXISTS vector;"
-
-
-async def ensure_schema() -> None:
-    async with db.get_pool().acquire() as conn:
-        await conn.execute(CREATE_SCHEMA)
-
-
 def to_vector(embedding: list[float]) -> str:
     """Format a Python float list as a pgvector literal, e.g. '[0.1,0.2]'.
 
