@@ -9,3 +9,4 @@ __pycache__/
 
 # stray dir if the shadcn CLI fails to resolve the @ alias
 web/@/
+.env.bak*
