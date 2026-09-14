@@ -174,20 +174,32 @@ services:
       N8N_HOST: ${N8N_HOST:-localhost}
       N8N_PORT: 5678
       N8N_PROTOCOL: ${N8N_PROTOCOL:-http}
-      WEBHOOK_URL: ${N8N_WEBHOOK_URL:-http://localhost:5678/}
+      # Browser-facing base URL n8n prints for its webhook nodes. Deliberately
+      # NOT N8N_WEBHOOK_URL: in this stack that variable is the *backend's*
+      # POST target (backend/app/n8n.py), which must keep resolving to the
+      # internal http://n8n:5678/webhook rather than looping out over TLS.
+      WEBHOOK_URL: ${N8N_PUBLIC_URL:-http://localhost:5678}/
       GENERIC_TIMEZONE: ${TIMEZONE:-UTC}
       N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:-CHANGE_ME}
       # n8n marks its auth cookie Secure for any host but localhost, which makes
       # signing in over plain http impossible. The default here is http on
       # :5678 — set N8N_SECURE_COOKIE=true once n8n is served over HTTPS.
       N8N_SECURE_COOKIE: ${N8N_SECURE_COOKIE:-false}
+      # Number of reverse proxies in front of n8n. 1 when Caddy terminates TLS
+      # for it, so n8n reads X-Forwarded-Proto/For instead of seeing every
+      # request as plain http from the Docker bridge.
+      N8N_PROXY_HOPS: ${N8N_PROXY_HOPS:-0}
       N8N_BASIC_AUTH_ACTIVE: ${N8N_BASIC_AUTH_ACTIVE:-false}
       N8N_BASIC_AUTH_USER: ${N8N_BASIC_AUTH_USER:-}
       N8N_BASIC_AUTH_PASSWORD: ${N8N_BASIC_AUTH_PASSWORD:-}
     volumes:
       - n8n_data:/home/node/.n8n
     ports:
-      - "${N8N_PORT:-5678}:5678"
+      # Direct plain-http access to n8n. When Caddy fronts n8n over TLS it binds
+      # the public :5678 itself, so this publish must move aside or the two
+      # collide — set N8N_BIND=127.0.0.1:5680 in .env for that setup. The
+      # default keeps the classic behaviour for installs with no DOMAIN/Caddy.
+      - "${N8N_BIND:-0.0.0.0:5678}:5678"
 
   # ── GlitchTip: self-hosted, Sentry-compatible error monitoring — OPTIONAL ─
   # Only runs under the `glitchtip` profile (start.sh enables it when
@@ -287,6 +299,9 @@ services:
       - "443:443"
       # GlitchTip over TLS on the same hostname — see the Caddyfile block.
       - "${GLITCHTIP_TLS_PORT:-8443}:8443"
+      # n8n over TLS on the same hostname — see the Caddyfile block. Keeps the
+      # familiar :5678 address working, just over https.
+      - "${N8N_TLS_PORT:-5678}:5678"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data       # ACME certs + account keys (must persist)
