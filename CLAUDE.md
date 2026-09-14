@@ -80,9 +80,18 @@ trip; it is the only thing that proves the ledger and the schema agree.
 
 ## CI/CD
 
-**There is no CI pipeline** (no `.github/workflows`). Deployment is a command on
-the server. Do not add a remote/CI deploy path without being asked — see
-`DEPLOY.md`.
+`.github/workflows/tests.yml` runs on every pull request and every push to
+`main`: `pytest` for the backend, `tsc -b` + `vitest` for the web app.
+
+**CI never touches a database.** `backend/tests/conftest.py` monkeypatches
+`db.get_pool` with a `FakePool` returning canned results, so no Postgres is
+started and **migrations are not exercised by CI at all**. A green build tells
+you nothing about whether your migration applies, or whether its `down` works.
+Run the up/down round trip yourself against a throwaway Postgres — see "Adding a
+migration" above. Do not treat a passing pipeline as migration coverage.
+
+**CI does not deploy.** Deployment is a command on the server. Do not add a
+remote/CI deploy path without being asked — see `DEPLOY.md`.
 
 ### How migrations reach production
 
